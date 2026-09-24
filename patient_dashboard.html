@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Dashboard</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="navbar">
+
+    <h1>💊 Medication Reminder</h1>
+
+    <div>
+
+        <a href="{{ url_for('dashboard') }}">
+            Dashboard
+        </a>
+
+        <a href="{{ url_for('patients') }}">
+            Patients
+        </a>
+
+        <a href="{{ url_for('add_prescription') }}">
+            Prescription
+        </a>
+
+        <a href="{{ url_for('report') }}">
+            Reports
+        </a>
+
+        <a href="{{ url_for('logout') }}">
+            Logout
+        </a>
+
+    </div>
+
+</div>
+
+
+<div class="container">
+
+    <h1>Dashboard</h1>
+
+    <br>
+
+
+    <div class="dashboard-cards">
+
+        <div class="card">
+
+            <p>Total Patients</p>
+
+            <h2>{{ patient_count|default(0) }}</h2>
+
+        </div>
+
+
+        <div class="card">
+
+            <p>Total Prescriptions</p>
+
+            <h2>{{ prescription_count|default(0) }}</h2>
+
+        </div>
+
+    </div>
+
+
+    <div class="card">
+
+        <h2>Recent Prescriptions</h2>
+
+        <br>
+
+        <table>
+
+            <tr>
+
+                <th>Patient</th>
+                <th>Medicine</th>
+                <th>Dosage</th>
+                <th>Frequency</th>
+                <th>Reminder</th>
+
+            </tr>
+
+            {% for p in prescriptions %}
+
+            <tr>
+
+                <td>{{ p.patient_name }}</td>
+
+                <td>{{ p.medicine_name }}</td>
+
+                <td>{{ p.dosage }}</td>
+
+                <td>{{ p.frequency }}</td>
+
+                <td>{{ p.reminder_time }}</td>
+
+            </tr>
+
+            {% else %}
+
+            <tr>
+
+                <td colspan="5">
+                    No prescriptions found.
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<script src="{{ url_for('static', filename='app.js') }}">
+</script>
+
+</body>
+
+</html>
