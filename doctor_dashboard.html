@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Doctor Dashboard</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="navbar">
+
+    <h1>👨‍⚕️ Doctor Dashboard</h1>
+
+    <div>
+
+        <a href="{{ url_for('patients') }}">
+            Patients
+        </a>
+
+        <a href="{{ url_for('add_prescription') }}">
+            Add Prescription
+        </a>
+
+        <a href="{{ url_for('report') }}">
+            Reports
+        </a>
+
+        <a href="{{ url_for('logout') }}">
+            Logout
+        </a>
+
+    </div>
+
+</div>
+
+
+<div class="container">
+
+    <div class="dashboard-cards">
+
+        <div class="card">
+
+            <h3>Total Patients</h3>
+
+            <h2>{{ patients|length }}</h2>
+
+        </div>
+
+        <div class="card">
+
+            <h3>Total Prescriptions</h3>
+
+            <h2>{{ prescriptions|length }}</h2>
+
+        </div>
+
+    </div>
+
+
+    <div class="card">
+
+        <h2>Patients</h2>
+
+        <br>
+
+        <table>
+
+            <tr>
+
+                <th>ID</th>
+                <th>Name</th>
+                <th>Age</th>
+                <th>Gender</th>
+                <th>Phone</th>
+                <th>Action</th>
+
+            </tr>
+
+            {% for patient in patients %}
+
+            <tr>
+
+                <td>{{ patient.id }}</td>
+
+                <td>{{ patient.name }}</td>
+
+                <td>{{ patient.age }}</td>
+
+                <td>{{ patient.gender }}</td>
+
+                <td>{{ patient.phone }}</td>
+
+                <td>
+
+                    <a class="btn"
+                       href="{{ url_for('patient_details', patient_id=patient.id) }}">
+
+                        View
+
+                    </a>
+
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </table>
+
+    </div>
+
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}">
+</script>
+
+</body>
+
+</html>
+
