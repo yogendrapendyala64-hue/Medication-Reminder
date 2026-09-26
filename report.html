@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Medication Report</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="navbar">
+
+    <h1>📊 Medication Report</h1>
+
+    <a href="{{ url_for('dashboard') }}">
+        Dashboard
+    </a>
+
+</div>
+
+
+<div class="container">
+
+    <div class="card">
+
+        <h2>Medication Report</h2>
+
+        <br>
+
+        <table>
+
+            <tr>
+
+                <th>Patient</th>
+                <th>Age</th>
+                <th>Gender</th>
+                <th>Phone</th>
+                <th>Medicine</th>
+                <th>Dosage</th>
+                <th>Frequency</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Reminder</th>
+
+            </tr>
+
+
+            {% for row in data %}
+
+            <tr>
+
+                <td>{{ row.patient_name }}</td>
+
+                <td>{{ row.age }}</td>
+
+                <td>{{ row.gender }}</td>
+
+                <td>{{ row.phone }}</td>
+
+                <td>{{ row.medicine_name }}</td>
+
+                <td>{{ row.dosage }}</td>
+
+                <td>{{ row.frequency }}</td>
+
+                <td>{{ row.start_date }}</td>
+
+                <td>{{ row.end_date }}</td>
+
+                <td>{{ row.reminder_time }}</td>
+
+            </tr>
+
+            {% endfor %}
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<script src="{{ url_for('static', filename='app.js') }}">
+</script>
+
+</body>
+
+</html>z
