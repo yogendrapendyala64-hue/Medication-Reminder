@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Edit Prescription</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="navbar">
+
+    <h1>✏️ Edit Prescription</h1>
+
+</div>
+
+
+<div class="container">
+
+    <div class="form-card">
+
+        <form method="POST">
+
+
+            <div class="form-group">
+
+                <label>Medicine Name</label>
+
+                <input
+                    type="text"
+                    name="medicine_name"
+                    value="{{ prescription.medicine_name }}"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Dosage</label>
+
+                <input
+                    type="text"
+                    name="dosage"
+                    value="{{ prescription.dosage }}"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Frequency</label>
+
+                <input
+                    type="text"
+                    name="frequency"
+                    value="{{ prescription.frequency }}"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Start Date</label>
+
+                <input
+                    type="date"
+                    name="start_date"
+                    value="{{ prescription.start_date }}"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>End Date</label>
+
+                <input
+                    type="date"
+                    name="end_date"
+                    value="{{ prescription.end_date }}"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Reminder Time</label>
+
+                <input
+                    type="time"
+                    name="reminder_time"
+                    value="{{ prescription.reminder_time }}"
+                >
+
+            </div>
+
+
+            <button type="submit">
+                Update Prescription
+            </button>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<script src="{{ url_for('static', filename='app.js') }}">
+</script>
+
+</body>
+
+</html>

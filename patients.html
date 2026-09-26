@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Patients</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="navbar">
+
+    <h1>Patients</h1>
+
+    <div>
+
+        <a href="{{ url_for('dashboard') }}">
+            Dashboard
+        </a>
+
+        <a href="{{ url_for('logout') }}">
+            Logout
+        </a>
+
+    </div>
+
+</div>
+
+
+<div class="container">
+
+    <h1>Patient Management</h1>
+
+    <br>
+
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+
+        {% for category, message in messages %}
+
+            <div class="message {{ category }}">
+                {{ message }}
+            </div>
+
+        {% endfor %}
+
+    {% endwith %}
+
+
+    <div class="card">
+
+        <h2>Add Patient</h2>
+
+        <br>
+
+        <form method="POST"
+              action="{{ url_for('add_patient') }}">
+
+            <div class="form-group">
+
+                <label>Name</label>
+
+                <input
+                    type="text"
+                    name="name"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Age</label>
+
+                <input
+                    type="number"
+                    name="age"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Gender</label>
+
+                <select name="gender">
+
+                    <option value="Male">
+                        Male
+                    </option>
+
+                    <option value="Female">
+                        Female
+                    </option>
+
+                    <option value="Other">
+                        Other
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Phone</label>
+
+                <input
+                    type="text"
+                    name="phone"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Email</label>
+
+                <input
+                    type="email"
+                    name="email"
+                >
+
+            </div>
+
+
+            <button type="submit">
+                Add Patient
+            </button>
+
+        </form>
+
+    </div>
+
+
+    <br>
+
+
+    <div class="card">
+
+        <h2>Patient List</h2>
+
+        <br>
+
+        <input
+            id="patientSearch"
+            class="search-box"
+            type="text"
+            placeholder="Search patient..."
+        >
+
+        <table>
+
+            <tr>
+
+                <th>ID</th>
+                <th>Name</th>
+                <th>Age</th>
+                <th>Gender</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Action</th>
+
+            </tr>
+
+
+            {% for patient in patients %}
+
+            <tr class="patient-row">
+
+                <td>{{ patient.id }}</td>
+
+                <td>{{ patient.name }}</td>
+
+                <td>{{ patient.age }}</td>
+
+                <td>{{ patient.gender }}</td>
+
+                <td>{{ patient.phone }}</td>
+
+                <td>{{ patient.email }}</td>
+
+                <td>
+
+                    <a class="btn"
+                       href="{{ url_for('patient_details', patient_id=patient.id) }}">
+
+                        View
+
+                    </a>
+
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<script src="{{ url_for('static', filename='app.js') }}">
+</script>
+
+</body>
+
+</html>

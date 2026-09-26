@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Add Prescription</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<div class="navbar">
+
+    <h1>💊 Add Prescription</h1>
+
+    <a href="{{ url_for('dashboard') }}">
+        Dashboard
+    </a>
+
+</div>
+
+
+<div class="container">
+
+    <div class="form-card">
+
+        <h2>Add Medicine</h2>
+
+        <br>
+
+        <form method="POST">
+
+
+            <div class="form-group">
+
+                <label>Patient</label>
+
+                <select
+                    name="patient_id"
+                    required
+                >
+
+                    <option value="">
+                        Select Patient
+                    </option>
+
+                    {% for patient in patients %}
+
+                    <option value="{{ patient.id }}">
+
+                        {{ patient.name }}
+
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Medicine Name</label>
+
+                <input
+                    type="text"
+                    name="medicine_name"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Dosage</label>
+
+                <input
+                    type="text"
+                    name="dosage"
+                    placeholder="Example: 500 mg"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Frequency</label>
+
+                <input
+                    type="text"
+                    name="frequency"
+                    placeholder="Example: Twice a day"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Start Date</label>
+
+                <input
+                    type="date"
+                    name="start_date"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>End Date</label>
+
+                <input
+                    type="date"
+                    name="end_date"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>Reminder Time</label>
+
+                <input
+                    type="time"
+                    name="reminder_time"
+                >
+
+            </div>
+
+
+            <button type="submit">
+                Save Prescription
+            </button>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<script src="{{ url_for('static', filename='app.js') }}">
+</script>
+
+</body>
+
+</html>
