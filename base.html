@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        {% block title %}
+        Medication Reminder
+        {% endblock %}
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+<body>
+
+<header class="topbar">
+
+    <a
+        href="{{ url_for('index') }}"
+        class="brand"
+    >
+        <span class="brand-icon">+</span>
+        MedTrack
+    </a>
+
+    <nav>
+
+        {% if session.get("user_id") %}
+
+            {% if session.get("role") == "doctor" %}
+
+                <a href="{{ url_for('doctor_dashboard') }}">
+                    Dashboard
+                </a>
+
+                <a href="{{ url_for('add_prescription') }}">
+                    Add Medication
+                </a>
+
+            {% else %}
+
+                <a href="{{ url_for('patient_dashboard') }}">
+                    My Dashboard
+                </a>
+
+                <a href="{{ url_for('patient_report_pdf') }}">
+                    Weekly Report
+                </a>
+
+            {% endif %}
+
+            <a
+                href="{{ url_for('logout') }}"
+                class="logout-link"
+            >
+                Logout
+            </a>
+
+        {% else %}
+
+            <a href="{{ url_for('login') }}">
+                Login
+            </a>
+
+            <a
+                href="{{ url_for('register') }}"
+                class="nav-button"
+            >
+                Patient Sign Up
+            </a>
+
+        {% endif %}
+
+    </nav>
+
+</header>
+
+
+<main class="page">
+
+    {% with messages = get_flashed_messages(
+        with_categories=true
+    ) %}
+
+        {% if messages %}
+
+            <div class="flash-container">
+
+                {% for category, message in messages %}
+
+                    <div class="flash {{ category }}">
+                        {{ message }}
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% endif %}
+
+    {% endwith %}
+
+
+    {% block content %}
+    {% endblock %}
+
+</main>
+
+
+<script
+    src="{{ url_for('static', filename='app.js') }}"
+></script>
+
+{% block scripts %}
+{% endblock %}
+
+</body>
+
+</html>

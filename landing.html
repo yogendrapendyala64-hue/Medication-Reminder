@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}
+Medication Reminder
+{% endblock %}
+
+
+{% block content %}
+
+<section class="hero">
+
+    <div>
+
+        <div class="eyebrow">
+            SMART MEDICATION MANAGEMENT
+        </div>
+
+        <h1>
+            Never miss an important medication.
+        </h1>
+
+        <p>
+            MedTrack helps doctors manage patient
+            prescriptions and gives every patient
+            an individual dashboard with medication
+            reminders and weekly reports.
+        </p>
+
+        <div class="hero-actions">
+
+            <a
+                href="{{ url_for('login') }}"
+                class="btn primary"
+            >
+                Login
+            </a>
+
+            <a
+                href="{{ url_for('register') }}"
+                class="btn secondary"
+            >
+                Create Patient Account
+            </a>
+
+        </div>
+
+    </div>
+
+
+    <div class="hero-card">
+
+        <div class="pulse">
+            +
+        </div>
+
+        <h2>
+            Medication tracking
+        </h2>
+
+        <p>
+            Doctor → Prescription → Reminder →
+            Patient → Weekly Report
+        </p>
+
+        <div class="mini-stat">
+            Individual patient dashboards
+        </div>
+
+        <div class="mini-stat">
+            Medication adherence tracking
+        </div>
+
+        <div class="mini-stat">
+            Downloadable weekly reports
+        </div>
+
+    </div>
+
+</section>
+
+{% endblock %}

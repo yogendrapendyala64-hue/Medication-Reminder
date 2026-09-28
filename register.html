@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}
+Patient Registration
+{% endblock %}
+
+
+{% block content %}
+
+<div class="auth-page">
+
+    <form
+        method="POST"
+        class="card auth-card"
+    >
+
+        <div class="eyebrow">
+            PATIENT ACCOUNT
+        </div>
+
+        <h1>
+            Create your account
+        </h1>
+
+        <p class="muted">
+            Your account gives you your own
+            individual medication dashboard.
+        </p>
+
+
+        <label>
+            Full Name
+
+            <input
+                type="text"
+                name="full_name"
+                required
+            >
+
+        </label>
+
+
+        <label>
+            Email
+
+            <input
+                type="email"
+                name="email"
+                required
+            >
+
+        </label>
+
+
+        <label>
+            Password
+
+            <input
+                type="password"
+                name="password"
+                minlength="6"
+                required
+            >
+
+        </label>
+
+
+        <button
+            class="btn primary full"
+            type="submit"
+        >
+            Create Patient Account
+        </button>
+
+
+        <p class="form-footer">
+
+            Already have an account?
+
+            <a href="{{ url_for('login') }}">
+                Login
+            </a>
+
+        </p>
+
+    </form>
+
+</div>
+
+{% endblock %}
