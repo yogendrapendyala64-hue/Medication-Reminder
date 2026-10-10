@@ -1,26 +1,31 @@
-from datetime import datetime, timedelta
+"""Background job that checks for due reminders once a minute."""
+import logging
+import os
 
-def fixed_schedule(start, end, times):
-    slots = []
+from apscheduler.schedulers.background import BackgroundScheduler
 
-    current = start.date()
+from reminders import send_due_reminders
 
-    while current <= end.date():
-        for t in times:
-            slots.append(
-                datetime.combine(current, t)
-            )
+log = logging.getLogger("medipulse.scheduler")
+_scheduler = None
 
-        current += timedelta(days=1)
 
-    return slots
+def start_scheduler(app):
+    """Start the reminder job once per process (skips the debug reloader's parent process)."""
+    global _scheduler
+    if _scheduler is not None or os.environ.get("ENABLE_SCHEDULER", "1") != "1":
+        return None
+    if app.debug and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return None
 
-def interval_schedule(start, end, hours):
-    slots = []
-    current = start
+    def job():
+        try:
+            send_due_reminders(app.config["DATABASE"])
+        except Exception:
+            log.exception("Reminder check failed")
 
-    while current <= end:
-        slots.append(current)
-        current += timedelta(hours=hours)
-
-    return slots
+    _scheduler = BackgroundScheduler(daemon=True)
+    _scheduler.add_job(job, "interval", minutes=1, id="due-reminders", max_instances=1, coalesce=True)
+    _scheduler.start()
+    log.info("Reminder scheduler started")
+    return _scheduler

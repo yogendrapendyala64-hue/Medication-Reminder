@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ patient['name'] }} · MediPulse{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('patients') }}">{{ icon('chev', 12) }}All patients</a>
+<div class="panel">
+  <div class="profile-top">
+    <div>
+      <div class="eyebrow">Patient profile</div>
+      <h2>{{ patient['name'] }}</h2>
+      <p>{{ patient['email'] }}{% if patient['phone'] %} · {{ patient['phone'] }}{% endif %}</p>
+    </div>
+    <div class="row-btns">
+      <a class="btn ghost sm" href="{{ url_for('report_pdf', patient_id=patient['id']) }}">{{ icon('dl', 14) }}Weekly PDF</a>
+      <a class="btn sm" href="{{ url_for('add_prescription', patient_id=patient['id']) }}">{{ icon('plus', 14) }}Prescription</a>
+    </div>
+  </div>
+  <div class="facts">
+    <div><small>Condition</small><b>{{ patient['condition'] }}</b></div>
+    <div><small>Date of birth</small><b>{{ patient['dob'] or 'Not set' }}</b></div>
+    <div><small>Medications</small><b>{{ active_count }} active</b></div>
+    <div><small>Weekly adherence</small><b>{% if week['total'] %}{{ week['pct'] }}%{% else %}No doses yet{% endif %}</b></div>
+  </div>
+  <div class="eyebrow">Active plan</div>
+  <h3 style="margin-top:4px">Prescriptions</h3>
+  {% if prescriptions %}
+  <div class="rx">
+    {% for rx in prescriptions %}
+    <div class="rxrow">
+      <span class="chip-ic">{{ icon('clip') }}</span>
+      <div class="mid">
+        <div class="nm">{{ rx['name'] }}<span class="tag">{{ rx['dosage'] }}</span>{% if rx['end_date'] and rx['end_date'] < today %}<span class="pill bad">Ended</span>{% endif %}</div>
+        <div class="meta">{{ rx['frequency'] }} · {{ rx['reminder_time'] }}</div>
+        {% if rx['instructions'] %}<div class="ins">{{ rx['instructions'] }}</div>{% endif %}
+      </div>
+      <span class="t">{{ rx['reminder_time'] }}</span>
+      <div class="rx-actions">
+        <a class="icon-btn" href="{{ url_for('edit_prescription', rx_id=rx['id']) }}" aria-label="Edit {{ rx['name'] }}">{{ icon('edit') }}</a>
+        <form method="post" action="{{ url_for('delete_prescription', rx_id=rx['id']) }}" data-confirm="Remove {{ rx['name'] }} from this plan?">
+          <button class="icon-btn danger" type="submit" aria-label="Remove {{ rx['name'] }}">{{ icon('trash') }}</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty" style="min-height:120px"><p>No prescriptions yet. Add the first one to begin this care plan.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

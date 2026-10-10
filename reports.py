@@ -1,307 +1,77 @@
-from datetime import datetime, timedelta
-from io import BytesIO
+"""Weekly adherence report: data for the HTML view and a downloadable PDF."""
+import os
+import re
+from datetime import date
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle
-)
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
-from database import query
+import models
+
+REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+BRAND = colors.HexColor("#2a8267")
 
 
-def get_weekly_data(patient_id):
-
-    start = datetime.now()
-
-    start = start.replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0
-    )
-
-    start = start - timedelta(days=6)
-
-    end = start + timedelta(days=7)
-
-    patient = query(
-        """
-        SELECT
-            id,
-            full_name,
-            email
-        FROM users
-        WHERE id = %s
-        AND role = 'patient'
-        """,
-        (patient_id,),
-        fetchall=False
-    )
-
-    rows = query(
-        """
-        SELECT
-            p.medicine_name,
-            p.dose,
-            s.scheduled_at,
-            s.status
-
-        FROM dose_slots s
-
-        INNER JOIN prescriptions p
-            ON p.id = s.prescription_id
-
-        WHERE p.patient_id = %s
-
-        AND s.scheduled_at >= %s
-        AND s.scheduled_at < %s
-
-        ORDER BY
-            p.medicine_name,
-            s.scheduled_at
-        """,
-        (
-            patient_id,
-            start,
-            end
-        )
-    )
-
-    return patient, start, end, rows
+def build_report(db, patient_id):
+    patient = models.get_patient(db, patient_id)
+    week = models.week_stats(db, patient_id)
+    return {
+        "patient": patient,
+        "week": week,
+        "meds": models.list_prescriptions(db, patient_id, active_only=True),
+        "generated": date.today().strftime("%B %d, %Y").replace(" 0", " "),
+        "activity": [
+            f"{r['log_date']} • {r['med']} • {'Taken' if r['status'] == 'taken' else 'Missed'}"
+            for r in week["logs"]
+        ],
+    }
 
 
-def build_weekly_pdf(patient_id):
+def report_filename(patient):
+    slug = re.sub(r"[^a-z0-9]+", "-", patient["name"].lower()).strip("-") or "patient"
+    return f"{slug}-weekly-report.pdf"
 
-    patient, start, end, rows = get_weekly_data(
-        patient_id
-    )
 
-    if not patient:
-        return None
-
-    summary = {}
-
-    for row in rows:
-
-        medicine = row["medicine_name"]
-
-        if medicine not in summary:
-
-            summary[medicine] = {
-                "dose": row["dose"],
-                "scheduled": 0,
-                "taken": 0,
-                "missed": 0,
-                "pending": 0
-            }
-
-        summary[medicine]["scheduled"] += 1
-
-        if row["status"] == "taken":
-
-            summary[medicine]["taken"] += 1
-
-        elif row["status"] == "missed":
-
-            summary[medicine]["missed"] += 1
-
-        else:
-
-            summary[medicine]["pending"] += 1
-
-    buffer = BytesIO()
-
-    document = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
-
+def generate_pdf(data, folder=REPORTS_DIR):
+    """Write the report to reports/ and return the file path."""
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, report_filename(data["patient"]))
     styles = getSampleStyleSheet()
+    title = ParagraphStyle("t", parent=styles["Title"], textColor=BRAND, alignment=0, fontSize=24, spaceAfter=2)
+    sub = ParagraphStyle("s", parent=styles["Normal"], textColor=colors.HexColor("#555555"), fontSize=10)
+    h = ParagraphStyle("h", parent=styles["Heading2"], spaceBefore=16, spaceAfter=6, fontSize=13)
+    body = ParagraphStyle("b", parent=styles["Normal"], fontSize=10.5, leading=15)
+    note = ParagraphStyle("n", parent=body, leftIndent=14, textColor=colors.HexColor("#555555"))
 
-    story = []
-
-    story.append(
-        Paragraph(
-            "Medication Reminder - Weekly Report",
-            styles["Title"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 10)
-    )
-
-    story.append(
-        Paragraph(
-            f"<b>Patient:</b> {patient['full_name']}",
-            styles["Normal"]
-        )
-    )
-
-    story.append(
-        Paragraph(
-            f"<b>Email:</b> {patient['email']}",
-            styles["Normal"]
-        )
-    )
-
-    story.append(
-        Paragraph(
-            f"<b>Period:</b> "
-            f"{start.strftime('%d %b %Y')} - "
-            f"{(end - timedelta(days=1)).strftime('%d %b %Y')}",
-            styles["Normal"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 18)
-    )
-
-    table_data = [
-        [
-            "Medicine",
-            "Dose",
-            "Scheduled",
-            "Taken",
-            "Missed",
-            "Pending",
-            "Adherence"
-        ]
+    p, w = data["patient"], data["week"]
+    esc = lambda s: str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    story = [
+        Paragraph("MediPulse", title),
+        Paragraph("Weekly medication adherence report", sub),
+        Spacer(1, 18),
+        Paragraph(esc(p["name"]), ParagraphStyle("p", parent=styles["Heading1"], fontSize=18)),
+        Paragraph(f"Generated {data['generated']} &bull; {esc(p['condition'])}", sub),
+        Paragraph("Weekly overview", h),
+        Paragraph(f"Adherence: <b>{w['pct']}%</b> &nbsp;&nbsp; Taken: <b>{w['taken']}</b> &nbsp;&nbsp; Missed: <b>{w['missed']}</b>", body),
+        Paragraph("Active medications", h),
     ]
+    if data["meds"]:
+        for m in data["meds"]:
+            story.append(Paragraph(f"{esc(m['name'])} &mdash; {esc(m['dosage'])} &mdash; {esc(m['frequency'])} at {esc(m['reminder_time'])}", body))
+            if m["instructions"]:
+                story.append(Paragraph(esc(m["instructions"]), note))
+    else:
+        story.append(Paragraph("No active medications.", body))
+    story.append(Paragraph("Recent dose activity", h))
+    if data["activity"]:
+        for line in data["activity"]:
+            story.append(Paragraph(esc(line), body))
+    else:
+        story.append(Paragraph("No doses were logged this week.", body))
 
-    for medicine, data in summary.items():
-
-        adherence = (
-            data["taken"]
-            / data["scheduled"]
-            * 100
-            if data["scheduled"]
-            else 0
-        )
-
-        table_data.append(
-            [
-                medicine,
-                data["dose"],
-                data["scheduled"],
-                data["taken"],
-                data["missed"],
-                data["pending"],
-                f"{adherence:.1f}%"
-            ]
-        )
-
-    if len(table_data) == 1:
-
-        table_data.append(
-            [
-                "No medication data",
-                "-",
-                "0",
-                "0",
-                "0",
-                "0",
-                "0%"
-            ]
-        )
-
-    table = Table(
-        table_data,
-        repeatRows=1,
-        colWidths=[
-            85,
-            55,
-            55,
-            45,
-            45,
-            50,
-            55
-        ]
-    )
-
-    table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    colors.HexColor("#17352d")
-                ),
-                (
-                    "TEXTCOLOR",
-                    (0, 0),
-                    (-1, 0),
-                    colors.white
-                ),
-                (
-                    "FONTNAME",
-                    (0, 0),
-                    (-1, 0),
-                    "Helvetica-Bold"
-                ),
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.HexColor("#d8ddd8")
-                ),
-                (
-                    "FONTSIZE",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE"
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                )
-            ]
-        )
-    )
-
-    story.append(table)
-
-    story.append(
-        Spacer(1, 20)
-    )
-
-    story.append(
-        Paragraph(
-            "This report contains medication schedules "
-            "and the recorded taken/missed status.",
-            styles["BodyText"]
-        )
-    )
-
-    document.build(story)
-
-    buffer.seek(0)
-
-    return buffer
+    SimpleDocTemplate(path, pagesize=letter, leftMargin=inch, rightMargin=inch, topMargin=inch,
+                      bottomMargin=inch, title=f"Weekly report - {p['name']}", author="MediPulse").build(story)
+    return path

@@ -1,521 +1,213 @@
-from datetime import datetime, timedelta
+"""Queries and small business rules. Every function takes an open sqlite3 connection."""
+from datetime import date, timedelta
 
-from database import query, execute
+from werkzeug.security import check_password_hash, generate_password_hash
+
+FREQUENCIES = ["Once daily", "Twice daily", "Three times daily", "Every other day", "Weekly", "As needed"]
 
 
-# ---------------------------------------------------------
-# PATIENT
-# ---------------------------------------------------------
+def today_str():
+    return date.today().isoformat()
 
-def get_patient(patient_id):
 
-    return query(
-        """
-        SELECT
-            id,
-            full_name,
-            email,
-            created_at
-        FROM users
-        WHERE id = %s
-        AND role = 'patient'
-        """,
-        (patient_id,),
-        fetchall=False
+# ---------- users ----------
+def create_user(db, name, email, password, role):
+    cur = db.execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)",
+        (name.strip(), email.strip().lower(), generate_password_hash(password), role),
     )
+    db.commit()
+    return cur.lastrowid
 
 
-def get_all_patients():
+def get_user(db, user_id):
+    return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
-    return query(
-        """
-        SELECT
-            id,
-            full_name,
-            email
-        FROM users
-        WHERE role = 'patient'
-        ORDER BY full_name
-        """
+
+def get_user_by_email(db, email):
+    return db.execute("SELECT * FROM users WHERE email = ?", (email.strip().lower(),)).fetchone()
+
+
+def verify_login(db, email, password):
+    user = get_user_by_email(db, email)
+    if user and check_password_hash(user["password_hash"], password):
+        return user
+    return None
+
+
+def attach_patient_profile(db, user):
+    """Link a new patient account to a record the doctor already created, or make a fresh one."""
+    existing = db.execute(
+        "SELECT id FROM patients WHERE lower(email) = ? AND user_id IS NULL", (user["email"],)
+    ).fetchone()
+    if existing:
+        db.execute("UPDATE patients SET user_id = ? WHERE id = ?", (user["id"], existing["id"]))
+        db.commit()
+        return existing["id"]
+    cur = db.execute(
+        "INSERT INTO patients (user_id, name, email) VALUES (?,?,?)", (user["id"], user["name"], user["email"])
     )
+    db.commit()
+    return cur.lastrowid
 
 
-def get_patients_for_doctor(doctor_id):
-
-    return query(
-        """
-        SELECT DISTINCT
-            u.id,
-            u.full_name,
-            u.email
-        FROM users u
-        INNER JOIN prescriptions p
-            ON p.patient_id = u.id
-        WHERE p.doctor_id = %s
-        AND u.role = 'patient'
-        ORDER BY u.full_name
-        """,
-        (doctor_id,)
+# ---------- patients ----------
+def create_patient(db, doctor_id, name, email, phone="", dob="", condition=""):
+    cur = db.execute(
+        "INSERT INTO patients (doctor_id, name, email, phone, dob, condition) VALUES (?,?,?,?,?,?)",
+        (doctor_id, name.strip(), email.strip().lower(), phone.strip(), dob.strip(), condition.strip() or "Not set"),
     )
+    db.commit()
+    return cur.lastrowid
 
 
-# ---------------------------------------------------------
-# PRESCRIPTIONS
-# ---------------------------------------------------------
+def get_patient(db, patient_id):
+    return db.execute("SELECT * FROM patients WHERE id = ?", (patient_id,)).fetchone()
 
-def get_prescriptions_for_patient(patient_id):
 
-    return query(
-        """
-        SELECT
-            p.*,
-            d.full_name AS doctor_name
-        FROM prescriptions p
-        INNER JOIN users d
-            ON d.id = p.doctor_id
-        WHERE p.patient_id = %s
-        ORDER BY p.end_date DESC, p.id DESC
-        """,
-        (patient_id,)
+def patient_for_user(db, user_id):
+    return db.execute("SELECT * FROM patients WHERE user_id = ?", (user_id,)).fetchone()
+
+
+def patient_email_exists(db, email):
+    return db.execute("SELECT 1 FROM patients WHERE lower(email) = ?", (email.strip().lower(),)).fetchone() is not None
+
+
+def list_patients(db, query=""):
+    q = f"%{query.strip().lower()}%"
+    rows = db.execute(
+        "SELECT * FROM patients WHERE lower(name || ' ' || email || ' ' || condition) LIKE ? ORDER BY name COLLATE NOCASE",
+        (q,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["active_meds"] = len(list_prescriptions(db, row["id"], active_only=True))
+        item["week"] = week_stats(db, row["id"], with_logs=False)
+        out.append(item)
+    return out
+
+
+# ---------- prescriptions ----------
+def is_active(rx, today=None):
+    today = today or today_str()
+    return not rx["end_date"] or rx["end_date"] >= today
+
+
+def list_prescriptions(db, patient_id, active_only=False):
+    rows = db.execute(
+        "SELECT * FROM prescriptions WHERE patient_id = ? ORDER BY reminder_time, name", (patient_id,)
+    ).fetchall()
+    return [r for r in rows if is_active(r)] if active_only else rows
+
+
+def get_prescription(db, rx_id):
+    return db.execute("SELECT * FROM prescriptions WHERE id = ?", (rx_id,)).fetchone()
+
+
+def add_prescription(db, patient_id, data):
+    cur = db.execute(
+        "INSERT INTO prescriptions (patient_id, name, dosage, reminder_time, start_date, end_date, instructions, frequency)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (patient_id, data["name"], data["dosage"], data["reminder_time"], data["start_date"],
+         data["end_date"], data["instructions"], data["frequency"]),
     )
+    db.commit()
+    return cur.lastrowid
 
 
-def get_prescriptions_for_doctor(doctor_id):
-
-    return query(
-        """
-        SELECT
-            p.*,
-            u.full_name AS patient_name,
-            u.email AS patient_email
-        FROM prescriptions p
-        INNER JOIN users u
-            ON u.id = p.patient_id
-        WHERE p.doctor_id = %s
-        ORDER BY p.end_date DESC, p.id DESC
-        """,
-        (doctor_id,)
+def update_prescription(db, rx_id, data):
+    db.execute(
+        "UPDATE prescriptions SET name=?, dosage=?, reminder_time=?, start_date=?, end_date=?, instructions=?, frequency=?"
+        " WHERE id = ?",
+        (data["name"], data["dosage"], data["reminder_time"], data["start_date"], data["end_date"],
+         data["instructions"], data["frequency"], rx_id),
     )
+    db.commit()
 
 
-def doctor_has_patient(doctor_id, patient_id):
+def delete_prescription(db, rx_id):
+    db.execute("DELETE FROM prescriptions WHERE id = ?", (rx_id,))
+    db.commit()
 
-    result = query(
-        """
-        SELECT id
-        FROM prescriptions
-        WHERE doctor_id = %s
-        AND patient_id = %s
-        LIMIT 1
-        """,
-        (
-            doctor_id,
-            patient_id
-        ),
-        fetchall=False
+
+# ---------- dose logs ----------
+def set_dose(db, rx_id, status, log_date=None):
+    db.execute(
+        "INSERT INTO dose_logs (prescription_id, log_date, status) VALUES (?,?,?)"
+        " ON CONFLICT (prescription_id, log_date) DO UPDATE SET status = excluded.status, logged_at = datetime('now')",
+        (rx_id, log_date or today_str(), status),
     )
-
-    return bool(result)
-
-
-# ---------------------------------------------------------
-# CREATE PRESCRIPTION
-# ---------------------------------------------------------
-
-def create_prescription(
-    doctor_id,
-    patient_id,
-    medicine_name,
-    dose,
-    frequency_type,
-    fixed_times,
-    interval_hours,
-    start_date,
-    end_date,
-    notes
-):
-
-    prescription_id = execute(
-        """
-        INSERT INTO prescriptions
-        (
-            doctor_id,
-            patient_id,
-            medicine_name,
-            dose,
-            frequency_type,
-            fixed_times,
-            interval_hours,
-            start_date,
-            end_date,
-            notes
-        )
-        VALUES
-        (
-            %s,%s,%s,%s,%s,
-            %s,%s,%s,%s,%s
-        )
-        """,
-        (
-            doctor_id,
-            patient_id,
-            medicine_name,
-            dose,
-            frequency_type,
-            fixed_times,
-            interval_hours,
-            start_date,
-            end_date,
-            notes
-        )
-    )
-
-    generate_slots(prescription_id)
-
-    return prescription_id
-
-
-# ---------------------------------------------------------
-# GENERATE MEDICATION REMINDER SLOTS
-# ---------------------------------------------------------
-
-def generate_slots(prescription_id):
-
-    prescription = query(
-        """
-        SELECT *
-        FROM prescriptions
-        WHERE id = %s
-        """,
-        (prescription_id,),
-        fetchall=False
-    )
-
-    if not prescription:
-        return
-
-    start_date = prescription["start_date"]
-    end_date = prescription["end_date"]
-
-    # Fixed clock times
-    if prescription["frequency_type"] == "fixed_times":
-
-        times = [
-            x.strip()
-            for x in (
-                prescription["fixed_times"] or ""
-            ).split(",")
-            if x.strip()
-        ]
-
-        current_date = start_date
-
-        while current_date <= end_date:
-
-            for time_text in times:
-
-                try:
-
-                    parts = time_text.split(":")
-
-                    hour = int(parts[0])
-                    minute = int(parts[1])
-
-                    scheduled = datetime(
-                        current_date.year,
-                        current_date.month,
-                        current_date.day,
-                        hour,
-                        minute
-                    )
-
-                    execute(
-                        """
-                        INSERT IGNORE INTO dose_slots
-                        (
-                            prescription_id,
-                            scheduled_at
-                        )
-                        VALUES (%s,%s)
-                        """,
-                        (
-                            prescription_id,
-                            scheduled
-                        )
-                    )
-
-                except (ValueError, IndexError):
-                    continue
-
-            current_date += timedelta(days=1)
-
-    # Every N hours
-    else:
-
-        hours = int(
-            prescription["interval_hours"] or 8
-        )
-
-        current = datetime.combine(
-            start_date,
-            datetime.min.time()
-        )
-
-        end_datetime = datetime.combine(
-            end_date,
-            datetime.max.time()
-        )
-
-        while current <= end_datetime:
-
-            execute(
-                """
-                INSERT IGNORE INTO dose_slots
-                (
-                    prescription_id,
-                    scheduled_at
-                )
-                VALUES (%s,%s)
-                """,
-                (
-                    prescription_id,
-                    current
-                )
-            )
-
-            current += timedelta(hours=hours)
-
-
-# ---------------------------------------------------------
-# DOSES
-# ---------------------------------------------------------
-
-def mark_overdue_as_missed(patient_id=None):
-
-    extra_condition = ""
-    params = []
-
-    if patient_id is not None:
-
-        extra_condition = """
-            AND p.patient_id = %s
-        """
-
-        params.append(patient_id)
-
-    slots = query(
-        f"""
-        SELECT
-            s.id,
-            p.patient_id
-        FROM dose_slots s
-        INNER JOIN prescriptions p
-            ON p.id = s.prescription_id
-        WHERE s.status = 'pending'
-        AND s.scheduled_at <
-            NOW() - INTERVAL 30 MINUTE
-        {extra_condition}
-        """,
-        tuple(params)
-    )
-
-    for slot in slots:
-
-        execute(
-            """
-            UPDATE dose_slots
-            SET status = 'missed'
-            WHERE id = %s
-            AND status = 'pending'
-            """,
-            (slot["id"],)
-        )
-
-        execute(
-            """
-            INSERT INTO dose_logs
-            (
-                dose_slot_id,
-                patient_id,
-                status
-            )
-            SELECT
-                %s,
-                %s,
-                'missed'
-            WHERE NOT EXISTS
-            (
-                SELECT 1
-                FROM dose_logs
-                WHERE dose_slot_id = %s
-            )
-            """,
-            (
-                slot["id"],
-                slot["patient_id"],
-                slot["id"]
-            )
-        )
-
-
-def get_patient_doses(
-    patient_id,
-    days=7
-):
-
-    mark_overdue_as_missed(patient_id)
-
-    return query(
-        """
-        SELECT
-            s.id,
-            s.scheduled_at,
-            s.status,
-            s.taken_at,
-
-            p.id AS prescription_id,
-            p.medicine_name,
-            p.dose,
-            p.frequency_type
-
-        FROM dose_slots s
-
-        INNER JOIN prescriptions p
-            ON p.id = s.prescription_id
-
-        WHERE p.patient_id = %s
-
-        AND s.scheduled_at >=
-            NOW() - INTERVAL 1 DAY
-
-        AND s.scheduled_at <
-            NOW() + INTERVAL %s DAY
-
-        ORDER BY s.scheduled_at ASC
-        """,
-        (
-            patient_id,
-            days
-        )
-    )
-
-
-def log_dose(
-    slot_id,
-    patient_id,
-    status
-):
-
-    if status not in (
-        "taken",
-        "missed"
-    ):
-        return False
-
-    slot = query(
-        """
-        SELECT
-            s.id,
-            s.status,
-            p.patient_id
-        FROM dose_slots s
-
-        INNER JOIN prescriptions p
-            ON p.id = s.prescription_id
-
-        WHERE s.id = %s
-        """,
-        (slot_id,),
-        fetchall=False
-    )
-
-    if not slot:
-        return False
-
-    if slot["patient_id"] != patient_id:
-        return False
-
-    execute(
-        """
-        UPDATE dose_slots
-        SET
-            status = %s,
-            taken_at =
-                CASE
-                    WHEN %s = 'taken'
-                    THEN NOW()
-                    ELSE NULL
-                END
-        WHERE id = %s
-        """,
-        (
-            status,
-            status,
-            slot_id
-        )
-    )
-
-    execute(
-        """
-        INSERT INTO dose_logs
-        (
-            dose_slot_id,
-            patient_id,
-            status
-        )
-        VALUES (%s,%s,%s)
-        """,
-        (
-            slot_id,
-            patient_id,
-            status
-        )
-    )
-
-    return True
-
-
-# ---------------------------------------------------------
-# DASHBOARD STATISTICS
-# ---------------------------------------------------------
-
-def get_patient_statistics(patient_id):
-
-    rows = get_patient_doses(
-        patient_id,
-        7
-    )
-
-    scheduled = len(rows)
-
-    taken = sum(
-        1
-        for row in rows
-        if row["status"] == "taken"
-    )
-
-    missed = sum(
-        1
-        for row in rows
-        if row["status"] == "missed"
-    )
-
-    pending = sum(
-        1
-        for row in rows
-        if row["status"] == "pending"
-    )
-
-    adherence = (
-        (taken / scheduled) * 100
-        if scheduled
-        else 0
-    )
-
+    db.commit()
+
+
+def clear_dose(db, rx_id, log_date=None):
+    db.execute("DELETE FROM dose_logs WHERE prescription_id = ? AND log_date = ?", (rx_id, log_date or today_str()))
+    db.commit()
+
+
+def today_plan(db, patient_id):
+    """Active prescriptions with today's logged status (None, 'taken' or 'missed')."""
+    today = today_str()
+    plan = []
+    for rx in list_prescriptions(db, patient_id, active_only=True):
+        log = db.execute(
+            "SELECT status FROM dose_logs WHERE prescription_id = ? AND log_date = ?", (rx["id"], today)
+        ).fetchone()
+        item = dict(rx)
+        item["status"] = log["status"] if log else None
+        plan.append(item)
+    return plan
+
+
+def week_stats(db, patient_id, with_logs=True):
+    start = (date.today() - timedelta(days=6)).isoformat()
+    rows = db.execute(
+        "SELECT dl.log_date, dl.status, p.name AS med, p.dosage FROM dose_logs dl"
+        " JOIN prescriptions p ON p.id = dl.prescription_id"
+        " WHERE p.patient_id = ? AND dl.log_date >= ? ORDER BY dl.log_date DESC, p.name",
+        (patient_id, start),
+    ).fetchall()
+    taken = sum(1 for r in rows if r["status"] == "taken")
+    total = len(rows)
     return {
-        "scheduled": scheduled,
         "taken": taken,
-        "missed": missed,
-        "pending": pending,
-        "adherence": round(adherence, 1)
+        "missed": total - taken,
+        "total": total,
+        "pct": round(taken / total * 100) if total else 0,
+        "logs": rows if with_logs else [],
+    }
+
+
+def streak(db, patient_id):
+    """Consecutive days (ending today or yesterday) with a taken dose and nothing missed."""
+    rows = db.execute(
+        "SELECT dl.log_date, dl.status FROM dose_logs dl JOIN prescriptions p ON p.id = dl.prescription_id"
+        " WHERE p.patient_id = ?", (patient_id,),
+    ).fetchall()
+    by_day = {}
+    for r in rows:
+        by_day.setdefault(r["log_date"], set()).add(r["status"])
+    count = 0
+    for back in range(0, 120):
+        day = (date.today() - timedelta(days=back)).isoformat()
+        statuses = by_day.get(day)
+        if statuses is None:
+            if back == 0:
+                continue
+            break
+        if "taken" in statuses and "missed" not in statuses:
+            count += 1
+        else:
+            break
+    return count
+
+
+def clinic_summary(db):
+    patients = list_patients(db)
+    return {
+        "patients": patients,
+        "total": len(patients),
+        "plans": sum(1 for p in patients if p["active_meds"]),
+        "follow_ups": [p for p in patients if p["week"]["missed"] > 0 or not p["active_meds"]],
     }

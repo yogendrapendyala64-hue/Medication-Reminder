@@ -1,92 +1,43 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-
-    <title>Medication Report</title>
-
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
-
-</head>
-
-<body>
-
-<div class="navbar">
-
-    <h1>📊 Medication Report</h1>
-
-    <a href="{{ url_for('dashboard') }}">
-        Dashboard
-    </a>
-
+{% extends "base.html" %}
+{% block title %}Weekly report · MediPulse{% endblock %}
+{% block content %}
+{% set p = report['patient'] %}{% set w = report['week'] %}
+<a class="back" href="{{ back_url }}">{{ icon('chev', 12) }}Back</a>
+<div class="top">
+  <div><div class="eyebrow">Weekly report</div><h1>{{ p['name'] }}</h1></div>
+  <div class="page-actions"><a class="btn" href="{{ url_for('report_pdf', patient_id=p['id']) }}">{{ icon('dl', 14) }}Download PDF</a></div>
 </div>
-
-
-<div class="container">
-
-    <div class="card">
-
-        <h2>Medication Report</h2>
-
-        <br>
-
-        <table>
-
-            <tr>
-
-                <th>Patient</th>
-                <th>Age</th>
-                <th>Gender</th>
-                <th>Phone</th>
-                <th>Medicine</th>
-                <th>Dosage</th>
-                <th>Frequency</th>
-                <th>Start</th>
-                <th>End</th>
-                <th>Reminder</th>
-
-            </tr>
-
-
-            {% for row in data %}
-
-            <tr>
-
-                <td>{{ row.patient_name }}</td>
-
-                <td>{{ row.age }}</td>
-
-                <td>{{ row.gender }}</td>
-
-                <td>{{ row.phone }}</td>
-
-                <td>{{ row.medicine_name }}</td>
-
-                <td>{{ row.dosage }}</td>
-
-                <td>{{ row.frequency }}</td>
-
-                <td>{{ row.start_date }}</td>
-
-                <td>{{ row.end_date }}</td>
-
-                <td>{{ row.reminder_time }}</td>
-
-            </tr>
-
-            {% endfor %}
-
-        </table>
-
+<div class="stats">
+  <div class="stat"><span class="chip-ic">{{ icon('pulse') }}</span><div><small>Adherence</small><b>{{ w['pct'] }}%</b><span>last 7 days</span></div></div>
+  <div class="stat"><span class="chip-ic">{{ icon('check') }}</span><div><small>Taken</small><b>{{ w['taken'] }}</b><span>doses</span></div></div>
+  <div class="stat"><span class="chip-ic amber">{{ icon('x') }}</span><div><small>Missed</small><b>{{ w['missed'] }}</b><span>doses</span></div></div>
+</div>
+<div class="split" style="grid-template-columns:minmax(0,1fr) minmax(250px,.5fr)">
+  <div class="panel">
+    <div class="panel-head"><div><div class="eyebrow">Last 7 days</div><h3>Dose activity</h3></div></div>
+    {% if w['logs'] %}
+    <div class="scroll-x"><table class="table">
+      <thead><tr><th>Date</th><th>Medication</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for l in w['logs'] %}
+        <tr><td>{{ l['log_date'] }}</td><td>{{ l['med'] }} <span class="tag">{{ l['dosage'] }}</span></td>
+        <td><span class="pill{{ ' bad' if l['status'] == 'missed' }}">{{ 'Taken' if l['status'] == 'taken' else 'Missed' }}</span></td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <div class="empty" style="min-height:140px"><p>No doses were logged this week.</p></div>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <div class="panel-head"><div><div class="eyebrow">Active plan</div><h3>Medications</h3></div></div>
+    <div class="rx" style="margin-top:0">
+      {% for m in report['meds'] %}
+      <div class="rxrow"><span class="chip-ic">{{ icon('clip') }}</span><div class="mid"><div class="nm">{{ m['name'] }}<span class="tag">{{ m['dosage'] }}</span></div><div class="meta">{{ m['frequency'] }} · {{ m['reminder_time'] }}</div>{% if m['instructions'] %}<div class="ins">{{ m['instructions'] }}</div>{% endif %}</div></div>
+      {% else %}
+      <div class="empty" style="min-height:100px"><p>No active medications.</p></div>
+      {% endfor %}
     </div>
-
+  </div>
 </div>
-
-
-<script src="{{ url_for('static', filename='app.js') }}">
-</script>
-
-</body>
-
-</html>z
+{% endblock %}

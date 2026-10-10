@@ -1,1010 +1,291 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from database import get_connection
-from functools import wraps
+"""MediPulse: medication reminders for care teams and patients.
+
+Run with:  python app.py   then open http://127.0.0.1:5000
+"""
+import os
+import re
+from datetime import date, datetime
+
+from dotenv import load_dotenv
+from flask import (Flask, abort, flash, g, redirect, render_template, request, send_file, url_for)
+from markupsafe import Markup
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+import database  # noqa: E402  (needs the .env values loaded first)
+import models  # noqa: E402
+import reports  # noqa: E402
+from auth import auth_bp, login_required, role_required  # noqa: E402
+from scheduler import start_scheduler  # noqa: E402
+
+ICONS = {
+    "heart": '<path d="M12 21s-7-4.6-9.3-9A5.2 5.2 0 0 1 12 6.5 5.2 5.2 0 0 1 21.3 12C19 16.4 12 21 12 21z"/>',
+    "pulse": '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>',
+    "clip": '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
+    "cal": '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+    "users": '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c.5-3.5 3-5.2 6-5.2s5.5 1.7 6 5.2"/><path d="M16 5a3 3 0 0 1 0 6M18 14.6c1.8.6 3 2.2 3.3 5.4"/>',
+    "user": '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.6-4 3.4-6 7-6s6.4 2 7 6"/>',
+    "search": '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/>',
+    "chev": '<path d="m9 6 6 6-6 6"/>',
+    "dl": '<path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 20h14"/>',
+    "plus": '<path d="M12 5v14M5 12h14"/>',
+    "x": '<path d="M6 6l12 12M18 6 6 18"/>',
+    "out": '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M16 8l4 4-4 4M20 12H9"/>',
+    "bell": '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4"/>',
+    "check": '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+    "steth": '<path d="M6 3v6a4 4 0 0 0 8 0V3M10 13v2a5 5 0 0 0 10 0v-1"/><circle cx="20" cy="12" r="2"/>',
+    "arrow": '<path d="M5 12h14m-5-5 5 5-5 5"/>',
+    "edit": '<path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/>',
+    "trash": '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13M10 11v6M14 11v6"/>',
+}
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
-# =========================================================
-# FLASK APPLICATION
-# =========================================================
+def create_app():
+    app = Flask(__name__)
+    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
+    db_name = os.environ.get("DATABASE", "medication.db")
+    app.config["DATABASE"] = db_name if os.path.isabs(db_name) else os.path.join(BASE_DIR, db_name)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-app = Flask(__name__)
+    database.init_db(app.config["DATABASE"])
+    database.seed_demo(app.config["DATABASE"])
+    app.teardown_appcontext(database.close_db)
+    app.register_blueprint(auth_bp)
 
-app.secret_key = "medication_reminder_secret_key_2026"
+    # ---------- template helpers ----------
+    @app.template_global()
+    def icon(name, size=None):
+        style = f' style="font-size:{size}px"' if size else ""
+        return Markup(f'<svg class="ic" viewBox="0 0 24 24"{style} aria-hidden="true">{ICONS[name]}</svg>')
 
+    @app.template_filter("initials")
+    def initials(name):
+        parts = str(name).split()
+        return ((parts[0][:1] + (parts[1][:1] if len(parts) > 1 else "")).upper()) or "?"
 
-# =========================================================
-# LOGIN REQUIRED
-# =========================================================
+    @app.context_processor
+    def inject():
+        hour = datetime.now().hour
+        return {
+            "user": g.get("user"),
+            "my_patient": g.get("my_patient"),
+            "greeting": "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening",
+            "today_label": date.today().strftime("%A %d %b"),
+            "frequencies": models.FREQUENCIES,
+        }
 
-def login_required(function):
+    # ---------- helpers ----------
+    def patient_or_404(patient_id):
+        patient = models.get_patient(database.get_db(), patient_id)
+        if patient is None:
+            abort(404)
+        if g.user["role"] == "patient" and patient["user_id"] != g.user["id"]:
+            abort(403)
+        return patient
 
-    @wraps(function)
-    def wrapper(*args, **kwargs):
+    def rx_for_doctor_or_404(rx_id):
+        rx = models.get_prescription(database.get_db(), rx_id)
+        if rx is None:
+            abort(404)
+        return rx
 
-        if "user_id" not in session:
-            return redirect(url_for("login"))
+    def read_prescription_form():
+        f = request.form
+        data = {
+            "name": f.get("name", "").strip(),
+            "dosage": f.get("dosage", "").strip(),
+            "reminder_time": f.get("reminder_time", "").strip() or "08:00",
+            "start_date": f.get("start_date", "").strip() or models.today_str(),
+            "end_date": f.get("end_date", "").strip(),
+            "instructions": f.get("instructions", "").strip(),
+            "frequency": f.get("frequency", "Once daily"),
+        }
+        error = None
+        if not data["name"]:
+            error = "Enter the medication name."
+        elif not data["dosage"]:
+            error = "Enter the dosage."
+        elif not TIME_RE.match(data["reminder_time"]):
+            error = "Use a reminder time like 08:00."
+        elif data["frequency"] not in models.FREQUENCIES:
+            error = "Choose a frequency from the list."
+        else:
+            try:
+                start = date.fromisoformat(data["start_date"])
+                end = date.fromisoformat(data["end_date"]) if data["end_date"] else None
+                if end and end < start:
+                    error = "The end date must be on or after the start date."
+            except ValueError:
+                error = "Use the date format YYYY-MM-DD."
+        return data, error
 
-        return function(*args, **kwargs)
+    # ---------- public pages ----------
+    @app.route("/")
+    def landing():
+        if g.user:
+            return redirect(url_for("dashboard"))
+        return render_template("landing.html")
 
-    return wrapper
-
-
-# =========================================================
-# HOME PAGE
-# =========================================================
-
-@app.route("/")
-def home():
-
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
-    role = session.get("role")
-
-    if role == "doctor":
-        return redirect(url_for("doctor_dashboard"))
-
-    elif role == "patient":
+    @app.route("/dashboard")
+    @login_required
+    def dashboard():
+        if g.user["role"] == "doctor":
+            return redirect(url_for("doctor_dashboard"))
         return redirect(url_for("patient_dashboard"))
 
-    else:
-        return redirect(url_for("dashboard"))
+    # ---------- doctor ----------
+    @app.route("/doctor")
+    @role_required("doctor")
+    def doctor_dashboard():
+        summary = models.clinic_summary(database.get_db())
+        return render_template("doctor_dashboard.html", **summary)
 
+    @app.route("/patients")
+    @role_required("doctor")
+    def patients():
+        q = request.args.get("q", "")
+        return render_template("patients.html", patients=models.list_patients(database.get_db(), q), q=q)
 
-# =========================================================
-# LOGIN
-# =========================================================
+    @app.route("/patients/add", methods=["POST"])
+    @role_required("doctor")
+    def add_patient():
+        db = database.get_db()
+        f = {k: request.form.get(k, "").strip() for k in ("name", "email", "phone", "dob", "condition")}
+        error = None
+        if not f["name"]:
+            error = "Enter the patient's full name."
+        elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", f["email"]):
+            error = "Enter a valid email address."
+        elif models.patient_email_exists(db, f["email"]):
+            error = "A patient with this email is already in your directory."
+        elif f["dob"]:
+            try:
+                date.fromisoformat(f["dob"])
+            except ValueError:
+                error = "Use the date of birth format YYYY-MM-DD."
+        if error:
+            flash(error, "error")
+            return redirect(request.referrer or url_for("doctor_dashboard"))
+        pid = models.create_patient(db, g.user["id"], **f)
+        flash(f"{f['name']} was added to your care directory.", "ok")
+        return redirect(url_for("patient_details", patient_id=pid))
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
+    @app.route("/patients/<int:patient_id>")
+    @role_required("doctor")
+    def patient_details(patient_id):
+        db = database.get_db()
+        patient = patient_or_404(patient_id)
+        return render_template(
+            "patient_details.html", patient=patient,
+            prescriptions=models.list_prescriptions(db, patient_id),
+            active_count=len(models.list_prescriptions(db, patient_id, active_only=True)),
+            week=models.week_stats(db, patient_id, with_logs=False), today=models.today_str(),
+        )
 
-    if request.method == "POST":
-
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-
-        if not username or not password:
-
-            flash(
-                "Please enter username and password.",
-                "error"
-            )
-
-            return render_template("login.html")
-
-        connection = get_connection()
-
-        if connection is None:
-
-            flash(
-                "Database connection failed.",
-                "error"
-            )
-
-            return render_template("login.html")
-
-        cursor = connection.cursor(dictionary=True)
-
-        try:
-
-            cursor.execute(
-                """
-                SELECT *
-                FROM users
-                WHERE username = %s
-                AND password = %s
-                """,
-                (username, password)
-            )
-
-            user = cursor.fetchone()
-
-        except Exception as e:
-
-            print("Login error:", e)
-
-            user = None
-
-        finally:
-
-            cursor.close()
-            connection.close()
-
-        if user:
-
-            session["user_id"] = user["id"]
-            session["username"] = user["username"]
-            session["role"] = user["role"]
-
-            if user["role"] == "doctor":
-
-                return redirect(
-                    url_for("doctor_dashboard")
-                )
-
-            elif user["role"] == "patient":
-
-                return redirect(
-                    url_for("patient_dashboard")
-                )
-
+    @app.route("/patients/<int:patient_id>/prescriptions/add", methods=["GET", "POST"])
+    @role_required("doctor")
+    def add_prescription(patient_id):
+        patient = patient_or_404(patient_id)
+        form = {"reminder_time": "08:00", "start_date": models.today_str(), "end_date": "", "frequency": "Once daily"}
+        if request.method == "POST":
+            form, error = read_prescription_form()
+            if error:
+                flash(error, "error")
             else:
+                models.add_prescription(database.get_db(), patient_id, form)
+                flash(f"{form['name']} was added to {patient['name']}'s plan.", "ok")
+                return redirect(url_for("patient_details", patient_id=patient_id))
+        return render_template("add_prescription.html", patient=patient, form=form)
 
-                return redirect(
-                    url_for("dashboard")
-                )
+    @app.route("/prescriptions/<int:rx_id>/edit", methods=["GET", "POST"])
+    @role_required("doctor")
+    def edit_prescription(rx_id):
+        rx = rx_for_doctor_or_404(rx_id)
+        patient = patient_or_404(rx["patient_id"])
+        form = dict(rx)
+        if request.method == "POST":
+            form, error = read_prescription_form()
+            if error:
+                flash(error, "error")
+            else:
+                models.update_prescription(database.get_db(), rx_id, form)
+                flash("Prescription updated.", "ok")
+                return redirect(url_for("patient_details", patient_id=patient["id"]))
+        return render_template("edit_prescription.html", patient=patient, rx=rx, form=form)
 
+    @app.route("/prescriptions/<int:rx_id>/delete", methods=["POST"])
+    @role_required("doctor")
+    def delete_prescription(rx_id):
+        rx = rx_for_doctor_or_404(rx_id)
+        models.delete_prescription(database.get_db(), rx_id)
+        flash(f"{rx['name']} was removed.", "ok")
+        return redirect(url_for("patient_details", patient_id=rx["patient_id"]))
+
+    # ---------- patient ----------
+    @app.route("/me")
+    @role_required("patient")
+    def patient_dashboard():
+        db = database.get_db()
+        patient = g.my_patient
+        if patient is None:
+            abort(404)
+        return render_template(
+            "patient_dashboard.html", patient=patient, plan=models.today_plan(db, patient["id"]),
+            week=models.week_stats(db, patient["id"], with_logs=False), streak=models.streak(db, patient["id"]),
+        )
+
+    @app.route("/me/dose/<int:rx_id>/<status>", methods=["POST"])
+    @role_required("patient")
+    def log_dose(rx_id, status):
+        db = database.get_db()
+        rx = models.get_prescription(db, rx_id)
+        if rx is None or g.my_patient is None or rx["patient_id"] != g.my_patient["id"]:
+            abort(404)
+        if status == "undo":
+            models.clear_dose(db, rx_id)
+        elif status in ("taken", "missed"):
+            models.set_dose(db, rx_id, status)
         else:
-
-            flash(
-                "Invalid username or password.",
-                "error"
-            )
-
-    return render_template("login.html")
-
-
-# =========================================================
-# LOGOUT
-# =========================================================
-
-@app.route("/logout")
-def logout():
-
-    session.clear()
-
-    return redirect(url_for("login"))
-
-
-# =========================================================
-# ADMIN DASHBOARD
-# =========================================================
-
-@app.route("/dashboard")
-@login_required
-def dashboard():
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    # Get patients
-    cursor.execute(
-        """
-        SELECT *
-        FROM patients
-        ORDER BY id DESC
-        """
-    )
-
-    patients = cursor.fetchall()
-
-    # Get prescriptions
-    cursor.execute(
-        """
-        SELECT
-            prescriptions.*,
-            patients.name AS patient_name
-        FROM prescriptions
-        LEFT JOIN patients
-        ON prescriptions.patient_id = patients.id
-        ORDER BY prescriptions.id DESC
-        """
-    )
-
-    prescriptions = cursor.fetchall()
-
-    # Patient count
-    cursor.execute(
-        """
-        SELECT COUNT(*) AS total
-        FROM patients
-        """
-    )
-
-    patient_count = cursor.fetchone()["total"]
-
-    # Prescription count
-    cursor.execute(
-        """
-        SELECT COUNT(*) AS total
-        FROM prescriptions
-        """
-    )
-
-    prescription_count = cursor.fetchone()["total"]
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "patient_dashboard.html",
-        patients=patients,
-        prescriptions=prescriptions,
-        patient_count=patient_count,
-        prescription_count=prescription_count
-    )
-
-
-# =========================================================
-# DOCTOR DASHBOARD
-# =========================================================
-
-@app.route("/doctor_dashboard")
-@login_required
-def doctor_dashboard():
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM patients
-        ORDER BY id DESC
-        """
-    )
-
-    patients = cursor.fetchall()
-
-    cursor.execute(
-        """
-        SELECT
-            prescriptions.*,
-            patients.name AS patient_name
-        FROM prescriptions
-        LEFT JOIN patients
-        ON prescriptions.patient_id = patients.id
-        ORDER BY prescriptions.id DESC
-        """
-    )
-
-    prescriptions = cursor.fetchall()
-
-    cursor.execute(
-        """
-        SELECT COUNT(*) AS total
-        FROM patients
-        """
-    )
-
-    patient_count = cursor.fetchone()["total"]
-
-    cursor.execute(
-        """
-        SELECT COUNT(*) AS total
-        FROM prescriptions
-        """
-    )
-
-    prescription_count = cursor.fetchone()["total"]
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "doctor_dashboard.html",
-        patients=patients,
-        prescriptions=prescriptions,
-        patient_count=patient_count,
-        prescription_count=prescription_count
-    )
-
-
-# =========================================================
-# PATIENT DASHBOARD
-# =========================================================
-
-@app.route("/patient_dashboard")
-@login_required
-def patient_dashboard():
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM patients
-        ORDER BY id DESC
-        """
-    )
-
-    patients = cursor.fetchall()
-
-    cursor.execute(
-        """
-        SELECT
-            prescriptions.*,
-            patients.name AS patient_name
-        FROM prescriptions
-        LEFT JOIN patients
-        ON prescriptions.patient_id = patients.id
-        ORDER BY prescriptions.id DESC
-        """
-    )
-
-    prescriptions = cursor.fetchall()
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "patient_dashboard.html",
-        patients=patients,
-        prescriptions=prescriptions
-    )
-
-
-# =========================================================
-# PATIENT LIST
-# =========================================================
-
-@app.route("/patients")
-@login_required
-def patients():
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM patients
-        ORDER BY id DESC
-        """
-    )
-
-    patients_data = cursor.fetchall()
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "patients.html",
-        patients=patients_data
-    )
-
-
-# =========================================================
-# ADD PATIENT
-# =========================================================
-
-@app.route("/add_patient", methods=["GET", "POST"])
-@login_required
-def add_patient():
-
-    if request.method == "POST":
-
-        name = request.form.get(
-            "name", ""
-        ).strip()
-
-        age = request.form.get("age")
-
-        gender = request.form.get(
-            "gender", ""
-        ).strip()
-
-        phone = request.form.get(
-            "phone", ""
-        ).strip()
-
-        email = request.form.get(
-            "email", ""
-        ).strip()
-
-        if not name:
-
-            flash(
-                "Patient name is required.",
-                "error"
-            )
-
-            return redirect(
-                url_for("patients")
-            )
-
-        connection = get_connection()
-
-        if connection is None:
-            return "Database connection failed."
-
-        cursor = connection.cursor()
-
-        cursor.execute(
-            """
-            INSERT INTO patients
-            (
-                name,
-                age,
-                gender,
-                phone,
-                email
-            )
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                name,
-                age if age else None,
-                gender,
-                phone,
-                email
-            )
-        )
-
-        connection.commit()
-
-        cursor.close()
-        connection.close()
-
-        flash(
-            "Patient added successfully.",
-            "success"
-        )
-
-        return redirect(
-            url_for("patients")
-        )
-
-    return render_template(
-        "patients.html"
-    )
-
-
-# =========================================================
-# PATIENT DETAILS
-# =========================================================
-
-@app.route("/patient/<int:patient_id>")
-@login_required
-def patient_details(patient_id):
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    # Get patient
-    cursor.execute(
-        """
-        SELECT *
-        FROM patients
-        WHERE id = %s
-        """,
-        (patient_id,)
-    )
-
-    patient = cursor.fetchone()
-
-    if patient is None:
-
-        cursor.close()
-        connection.close()
-
-        flash(
-            "Patient not found.",
-            "error"
-        )
-
-        return redirect(
-            url_for("patients")
-        )
-
-    # Get prescriptions
-    cursor.execute(
-        """
-        SELECT *
-        FROM prescriptions
-        WHERE patient_id = %s
-        ORDER BY id DESC
-        """,
-        (patient_id,)
-    )
-
-    prescriptions = cursor.fetchall()
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "patient_details.html",
-        patient=patient,
-        prescriptions=prescriptions
-    )
-
-
-# =========================================================
-# DELETE PATIENT
-# =========================================================
-
-@app.route("/delete_patient/<int:patient_id>")
-@login_required
-def delete_patient(patient_id):
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor()
-
-    cursor.execute(
-        """
-        DELETE FROM patients
-        WHERE id = %s
-        """,
-        (patient_id,)
-    )
-
-    connection.commit()
-
-    cursor.close()
-    connection.close()
-
-    flash(
-        "Patient deleted successfully.",
-        "success"
-    )
-
-    return redirect(
-        url_for("patients")
-    )
-
-
-# =========================================================
-# ADD PRESCRIPTION
-# =========================================================
-
-@app.route(
-    "/add_prescription",
-    methods=["GET", "POST"]
-)
-@login_required
-def add_prescription():
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    # Get all patients
-    cursor.execute(
-        """
-        SELECT *
-        FROM patients
-        ORDER BY name
-        """
-    )
-
-    patients_data = cursor.fetchall()
-
-    if request.method == "POST":
-
-        patient_id = request.form.get(
-            "patient_id"
-        )
-
-        medicine_name = request.form.get(
-            "medicine_name",
-            ""
-        ).strip()
-
-        dosage = request.form.get(
-            "dosage",
-            ""
-        ).strip()
-
-        frequency = request.form.get(
-            "frequency",
-            ""
-        ).strip()
-
-        start_date = request.form.get(
-            "start_date"
-        )
-
-        end_date = request.form.get(
-            "end_date"
-        )
-
-        reminder_time = request.form.get(
-            "reminder_time"
-        )
-
-        if not patient_id or not medicine_name:
-
-            cursor.close()
-            connection.close()
-
-            flash(
-                "Patient and medicine name are required.",
-                "error"
-            )
-
-            return render_template(
-                "add_prescription.html",
-                patients=patients_data
-            )
-
-        cursor.execute(
-            """
-            INSERT INTO prescriptions
-            (
-                patient_id,
-                medicine_name,
-                dosage,
-                frequency,
-                start_date,
-                end_date,
-                reminder_time
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                patient_id,
-                medicine_name,
-                dosage,
-                frequency,
-                start_date if start_date else None,
-                end_date if end_date else None,
-                reminder_time if reminder_time else None
-            )
-        )
-
-        connection.commit()
-
-        cursor.close()
-        connection.close()
-
-        flash(
-            "Prescription added successfully.",
-            "success"
-        )
-
-        return redirect(
-            url_for(
-                "patient_details",
-                patient_id=patient_id
-            )
-        )
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "add_prescription.html",
-        patients=patients_data
-    )
-
-
-# =========================================================
-# EDIT PRESCRIPTION
-# =========================================================
-
-@app.route(
-    "/edit_prescription/<int:prescription_id>",
-    methods=["GET", "POST"]
-)
-@login_required
-def edit_prescription(prescription_id):
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM prescriptions
-        WHERE id = %s
-        """,
-        (prescription_id,)
-    )
-
-    prescription = cursor.fetchone()
-
-    if prescription is None:
-
-        cursor.close()
-        connection.close()
-
-        flash(
-            "Prescription not found.",
-            "error"
-        )
-
-        return redirect(
-            url_for("dashboard")
-        )
-
-    if request.method == "POST":
-
-        medicine_name = request.form.get(
-            "medicine_name",
-            ""
-        ).strip()
-
-        dosage = request.form.get(
-            "dosage",
-            ""
-        ).strip()
-
-        frequency = request.form.get(
-            "frequency",
-            ""
-        ).strip()
-
-        start_date = request.form.get(
-            "start_date"
-        )
-
-        end_date = request.form.get(
-            "end_date"
-        )
-
-        reminder_time = request.form.get(
-            "reminder_time"
-        )
-
-        cursor.execute(
-            """
-            UPDATE prescriptions
-            SET
-                medicine_name = %s,
-                dosage = %s,
-                frequency = %s,
-                start_date = %s,
-                end_date = %s,
-                reminder_time = %s
-            WHERE id = %s
-            """,
-            (
-                medicine_name,
-                dosage,
-                frequency,
-                start_date if start_date else None,
-                end_date if end_date else None,
-                reminder_time if reminder_time else None,
-                prescription_id
-            )
-        )
-
-        connection.commit()
-
-        patient_id = prescription["patient_id"]
-
-        cursor.close()
-        connection.close()
-
-        flash(
-            "Prescription updated successfully.",
-            "success"
-        )
-
-        return redirect(
-            url_for(
-                "patient_details",
-                patient_id=patient_id
-            )
-        )
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "edit_prescription.html",
-        prescription=prescription
-    )
-
-
-# =========================================================
-# DELETE PRESCRIPTION
-# =========================================================
-
-@app.route(
-    "/delete_prescription/<int:prescription_id>"
-)
-@login_required
-def delete_prescription(prescription_id):
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute(
-        """
-        SELECT patient_id
-        FROM prescriptions
-        WHERE id = %s
-        """,
-        (prescription_id,)
-    )
-
-    prescription = cursor.fetchone()
-
-    if prescription is None:
-
-        cursor.close()
-        connection.close()
-
-        flash(
-            "Prescription not found.",
-            "error"
-        )
-
-        return redirect(
-            url_for("dashboard")
-        )
-
-    patient_id = prescription["patient_id"]
-
-    cursor.execute(
-        """
-        DELETE FROM prescriptions
-        WHERE id = %s
-        """,
-        (prescription_id,)
-    )
-
-    connection.commit()
-
-    cursor.close()
-    connection.close()
-
-    flash(
-        "Prescription deleted successfully.",
-        "success"
-    )
-
-    return redirect(
-        url_for(
-            "patient_details",
-            patient_id=patient_id
-        )
-    )
-
-
-# =========================================================
-# REPORT
-# =========================================================
-
-@app.route("/report")
-@login_required
-def report():
-
-    connection = get_connection()
-
-    if connection is None:
-        return "Database connection failed."
-
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute(
-        """
-        SELECT
-            patients.id AS patient_id,
-            patients.name AS patient_name,
-            patients.age,
-            patients.gender,
-            patients.phone,
-            patients.email,
-
-            prescriptions.id AS prescription_id,
-            prescriptions.medicine_name,
-            prescriptions.dosage,
-            prescriptions.frequency,
-            prescriptions.start_date,
-            prescriptions.end_date,
-            prescriptions.reminder_time
-
-        FROM patients
-
-        LEFT JOIN prescriptions
-        ON patients.id = prescriptions.patient_id
-
-        ORDER BY patients.id DESC
-        """
-    )
-
-    data = cursor.fetchall()
-
-    cursor.close()
-    connection.close()
-
-    return render_template(
-        "report.html",
-        data=data
-    )
-
-
-# =========================================================
-# DATABASE TEST PAGE
-# =========================================================
-
-@app.route("/test")
-def test():
-
-    connection = get_connection()
-
-    if connection is None:
-
-        return """
-        <h2>MySQL Connection Failed</h2>
-        """
-
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "SELECT DATABASE()"
-    )
-
-    database_name = cursor.fetchone()[0]
-
-    cursor.close()
-    connection.close()
-
-    return f"""
-    <h2>Medication Reminder App</h2>
-    <p>Flask is running successfully.</p>
-    <p>MySQL is connected successfully.</p>
-    <p>Database: {database_name}</p>
-    """
-
-
-# =========================================================
-# START FLASK
-# =========================================================
+            abort(400)
+        return redirect(url_for("patient_dashboard") + "#today")
+
+    # ---------- reports ----------
+    @app.route("/patients/<int:patient_id>/report")
+    @login_required
+    def report_view(patient_id):
+        patient_or_404(patient_id)
+        data = reports.build_report(database.get_db(), patient_id)
+        back = url_for("patient_details", patient_id=patient_id) if g.user["role"] == "doctor" else url_for("patient_dashboard")
+        return render_template("report.html", report=data, back_url=back)
+
+    @app.route("/patients/<int:patient_id>/report.pdf")
+    @login_required
+    def report_pdf(patient_id):
+        patient_or_404(patient_id)
+        data = reports.build_report(database.get_db(), patient_id)
+        path = reports.generate_pdf(data)
+        return send_file(path, mimetype="application/pdf", as_attachment=True,
+                         download_name=reports.report_filename(data["patient"]))
+
+    # ---------- errors ----------
+    @app.errorhandler(403)
+    def forbidden(_e):
+        return render_template("error.html", code=403, message="You don't have access to that page."), 403
+
+    @app.errorhandler(404)
+    def not_found(_e):
+        return render_template("error.html", code=404, message="That page could not be found."), 404
+
+    return app
+
+
+app = create_app()
 
 if __name__ == "__main__":
-
-    print("----------------------------------------")
-    print("Medication Reminder App")
-    print("----------------------------------------")
-
-    connection = get_connection()
-
-    if connection is not None:
-
-        print("MySQL connection: SUCCESS")
-
-        connection.close()
-
-        print("Starting Flask server...")
-        print("Open: http://127.0.0.1:5000")
-
-        app.run(
-            host="127.0.0.1",
-            port=5000,
-            debug=True
-        )
-
-    else:
-
-        print("MySQL connection: FAILED")
-        print("Check database.py and MySQL Server.")
+    debug = os.environ.get("FLASK_DEBUG", "1") == "1"
+    app.debug = debug
+    start_scheduler(app)
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5000")), debug=debug)

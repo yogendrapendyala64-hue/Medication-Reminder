@@ -1,213 +1,102 @@
+"""SQLite helpers: connections, schema set-up and demo data."""
 import os
-import mysql.connector
-from mysql.connector import Error
-from dotenv import load_dotenv
+import sqlite3
+from datetime import date, timedelta
 
-load_dotenv()
+from flask import current_app, g
+from werkzeug.security import generate_password_hash
 
-DB_NAME = os.getenv("DB_NAME", "medication_reminder")
-
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "127.0.0.1"),
-    "port": int(os.getenv("DB_PORT", "3306")),
-    "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("Yogi@2007", ""),
-    "database": DB_NAME,
-}
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCHEMA_PATH = os.path.join(BASE_DIR, "schema.sql")
 
 
-def get_connection(with_database=True):
-    config = DB_CONFIG.copy()
-
-    if not with_database:
-        config.pop("database", None)
-
-    try:
-        return mysql.connector.connect(**config)
-    except Error as e:
-        raise RuntimeError(f"MySQL connection failed: {e}")
+def connect(path):
+    """Open a standalone connection (used by the scheduler and set-up code)."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
-def init_database():
-    """
-    Database and tables create automatically.
-    """
-
-    # Create database
-    connection = get_connection(with_database=False)
-
-    try:
-        cursor = connection.cursor()
-
-        cursor.execute(
-            f"""
-            CREATE DATABASE IF NOT EXISTS `{DB_NAME}`
-            CHARACTER SET utf8mb4
-            COLLATE utf8mb4_unicode_ci
-            """
-        )
-
-        cursor.close()
-        connection.close()
-
-    except Exception:
-        try:
-            connection.close()
-        except Exception:
-            pass
-        raise
-
-    # Connect to database
-    connection = get_connection()
-
-    try:
-        cursor = connection.cursor()
-
-        # USERS
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                full_name VARCHAR(120) NOT NULL,
-                email VARCHAR(190) NOT NULL UNIQUE,
-                password_hash VARCHAR(255) NOT NULL,
-                role ENUM('doctor', 'patient') NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB
-            """
-        )
-
-        # PRESCRIPTIONS
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS prescriptions (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-
-                doctor_id INT NOT NULL,
-                patient_id INT NOT NULL,
-
-                medicine_name VARCHAR(150) NOT NULL,
-                dose VARCHAR(100) NOT NULL,
-
-                frequency_type ENUM('fixed_times', 'interval')
-                    NOT NULL DEFAULT 'fixed_times',
-
-                fixed_times VARCHAR(255) DEFAULT NULL,
-                interval_hours INT DEFAULT NULL,
-
-                start_date DATE NOT NULL,
-                end_date DATE NOT NULL,
-
-                notes TEXT,
-
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-                FOREIGN KEY (doctor_id)
-                    REFERENCES users(id)
-                    ON DELETE CASCADE,
-
-                FOREIGN KEY (patient_id)
-                    REFERENCES users(id)
-                    ON DELETE CASCADE
-            ) ENGINE=InnoDB
-            """
-        )
-
-        # DOSE SLOTS
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS dose_slots (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-
-                prescription_id INT NOT NULL,
-
-                scheduled_at DATETIME NOT NULL,
-
-                status ENUM('pending', 'taken', 'missed')
-                    NOT NULL DEFAULT 'pending',
-
-                taken_at DATETIME DEFAULT NULL,
-
-                UNIQUE KEY unique_dose_slot
-                    (prescription_id, scheduled_at),
-
-                FOREIGN KEY (prescription_id)
-                    REFERENCES prescriptions(id)
-                    ON DELETE CASCADE
-            ) ENGINE=InnoDB
-            """
-        )
-
-        # DOSE LOGS
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS dose_logs (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-
-                dose_slot_id INT NOT NULL,
-                patient_id INT NOT NULL,
-
-                status ENUM('taken', 'missed')
-                    NOT NULL,
-
-                logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-
-                notes VARCHAR(255),
-
-                FOREIGN KEY (dose_slot_id)
-                    REFERENCES dose_slots(id)
-                    ON DELETE CASCADE,
-
-                FOREIGN KEY (patient_id)
-                    REFERENCES users(id)
-                    ON DELETE CASCADE
-            ) ENGINE=InnoDB
-            """
-        )
-
-        connection.commit()
-        cursor.close()
-
-    finally:
-        connection.close()
+def get_db():
+    """Per-request connection, stored on flask.g."""
+    if "db" not in g:
+        g.db = connect(current_app.config["DATABASE"])
+    return g.db
 
 
-def query(sql, params=None, fetchall=True):
-    connection = get_connection()
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute(sql, params or ())
-
-        if fetchall:
-            result = cursor.fetchall()
-        else:
-            result = cursor.fetchone()
-
-        cursor.close()
-
-        return result
-
-    finally:
-        connection.close()
+def close_db(_error=None):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
 
 
-def execute(sql, params=None):
-    connection = get_connection()
+def init_db(path):
+    conn = connect(path)
+    with open(SCHEMA_PATH, encoding="utf-8") as fh:
+        conn.executescript(fh.read())
+    conn.commit()
+    conn.close()
 
-    try:
-        cursor = connection.cursor()
 
-        cursor.execute(sql, params or ())
+def seed_demo(path):
+    """Create the demo doctor, demo patient and sample care plans if the database is empty."""
+    conn = connect(path)
+    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
+        conn.close()
+        return
+    pw = generate_password_hash("demo1234")
+    doc = conn.execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)",
+        ("Dr. Maya Chen", "doctor@medipulse.app", pw, "doctor"),
+    ).lastrowid
+    jordan_user = conn.execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)",
+        ("Jordan Williams", "jordan@medipulse.app", pw, "patient"),
+    ).lastrowid
 
-        connection.commit()
+    people = [
+        ("Jordan Williams", "jordan@medipulse.app", "(555) 014-2290", "1984-06-18", "Hypertension", jordan_user),
+        ("Priya Nair", "priya.nair@example.com", "(555) 018-7741", "1991-03-02", "Type 2 diabetes", None),
+        ("Marcus Reed", "marcus.reed@example.com", "(555) 011-9035", "1975-11-27", "Asthma", None),
+        ("Elena Rossi", "elena.rossi@example.com", "(555) 016-3358", "1968-09-09", "Hypothyroidism", None),
+    ]
+    ids = []
+    for name, email, phone, dob, cond, uid in people:
+        ids.append(conn.execute(
+            "INSERT INTO patients (user_id, doctor_id, name, email, phone, dob, condition) VALUES (?,?,?,?,?,?,?)",
+            (uid, doc, name, email, phone, dob, cond),
+        ).lastrowid)
 
-        last_id = cursor.lastrowid
+    today = date.today()
+    far = (today + timedelta(days=120)).isoformat()
+    meds = [
+        (ids[0], "Lisinopril", "10 mg", "08:00", 30, "Take with water before breakfast", "Once daily", [1, 2, 3], [4]),
+        (ids[0], "Metoprolol", "25 mg", "09:00", 30, "Take with water", "Once daily", [1, 2, 4], [3]),
+        (ids[0], "Aspirin", "75 mg", "09:00", 14, "Follow your prescribed care plan", "Once daily", [1, 3], [2]),
+        (ids[0], "Vitamin D3", "1000 IU", "20:00", 14, "Take with dinner", "Once daily", [1, 2, 3], []),
+        (ids[1], "Metformin", "500 mg", "08:30", 60, "Take with food", "Twice daily", [1, 2, 3, 4], []),
+        (ids[2], "Salbutamol inhaler", "2 puffs", "07:30", 40, "Rinse mouth after use", "As needed", [1, 2], [3]),
+    ]
+    for pid, name, dose, t, back, ins, freq, taken, missed in meds:
+        rx = conn.execute(
+            "INSERT INTO prescriptions (patient_id, name, dosage, reminder_time, start_date, end_date, instructions, frequency)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (pid, name, dose, t, (today - timedelta(days=back)).isoformat(), far, ins, freq),
+        ).lastrowid
+        for n in taken:
+            conn.execute("INSERT INTO dose_logs (prescription_id, log_date, status) VALUES (?,?,?)",
+                         (rx, (today - timedelta(days=n)).isoformat(), "taken"))
+        for n in missed:
+            conn.execute("INSERT INTO dose_logs (prescription_id, log_date, status) VALUES (?,?,?)",
+                         (rx, (today - timedelta(days=n)).isoformat(), "missed"))
+    conn.commit()
+    conn.close()
 
-        cursor.close()
 
-        return last_id
-
-    finally:
-        connection.close()
+if __name__ == "__main__":
+    # python database.py  ->  create medication.db with demo data
+    target = os.path.join(BASE_DIR, os.environ.get("DATABASE", "medication.db"))
+    init_db(target)
+    seed_demo(target)
+    print("Database ready:", target)

@@ -1,183 +1,54 @@
-document.addEventListener("DOMContentLoaded", function () {
+/* MediPulse front-end helpers: modals, live search, confirmations, flash messages. */
+(function () {
+  function openModal(id) {
+    var m = document.getElementById(id);
+    if (!m) return;
+    m.hidden = false;
+    var first = m.querySelector("input, select, textarea");
+    if (first) first.focus();
+  }
+  function closeModals() {
+    document.querySelectorAll(".scrim").forEach(function (m) { m.hidden = true; });
+  }
 
-    console.log("Medication Reminder App loaded.");
+  document.addEventListener("click", function (e) {
+    var opener = e.target.closest("[data-open-modal]");
+    if (opener) { e.preventDefault(); openModal(opener.getAttribute("data-open-modal")); return; }
+    if (e.target.closest("[data-close-modal]")) { closeModals(); return; }
+    if (e.target.classList && e.target.classList.contains("scrim")) { closeModals(); return; }
+    var dismiss = e.target.closest("[data-dismiss]");
+    if (dismiss) dismiss.parentElement.remove();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeModals(); });
 
-
-    // ================================
-    // FLASH MESSAGE AUTO HIDE
-    // ================================
-
-    const messages =
-        document.querySelectorAll(".message");
-
-    messages.forEach(function (message) {
-
-        setTimeout(function () {
-
-            message.style.opacity = "0";
-
-            setTimeout(function () {
-                message.remove();
-            }, 500);
-
-        }, 4000);
-
-    });
-
-
-    // ================================
-    // DELETE CONFIRMATION
-    // ================================
-
-    const deleteButtons =
-        document.querySelectorAll(".delete-btn");
-
-    deleteButtons.forEach(function (button) {
-
-        button.addEventListener(
-            "click",
-            function (event) {
-
-                const answer = confirm(
-                    "Are you sure you want to delete this?"
-                );
-
-                if (!answer) {
-                    event.preventDefault();
-                }
-
-            }
-        );
-
-    });
-
-
-    // ================================
-    // SEARCH PATIENTS
-    // ================================
-
-    const search =
-        document.getElementById(
-            "patientSearch"
-        );
-
-    const rows =
-        document.querySelectorAll(
-            ".patient-row"
-        );
-
-    if (search) {
-
-        search.addEventListener(
-            "keyup",
-            function () {
-
-                const value =
-                    search.value.toLowerCase();
-
-                rows.forEach(function (row) {
-
-                    if (
-                        row.textContent
-                            .toLowerCase()
-                            .includes(value)
-                    ) {
-
-                        row.style.display = "";
-
-                    } else {
-
-                        row.style.display = "none";
-
-                    }
-
-                });
-
-            }
-        );
-
+  // Live filter: <input data-filter="#list"> hides rows of #list whose data-search text does not match.
+  document.querySelectorAll("[data-filter]").forEach(function (input) {
+    var target = document.querySelector(input.getAttribute("data-filter"));
+    if (!target) return;
+    var empty = target.parentElement.querySelector("[data-empty]");
+    function apply() {
+      var q = input.value.trim().toLowerCase(), shown = 0;
+      target.querySelectorAll("[data-search]").forEach(function (row) {
+        var hit = !q || row.getAttribute("data-search").indexOf(q) > -1;
+        row.hidden = !hit;
+        if (hit) shown++;
+      });
+      if (empty) empty.hidden = shown > 0;
     }
+    input.addEventListener("input", apply);
+    apply();
+  });
 
+  // Confirm before destructive actions: <form data-confirm="Remove this?">
+  document.addEventListener("submit", function (e) {
+    var msg = e.target.getAttribute && e.target.getAttribute("data-confirm");
+    if (msg && !window.confirm(msg)) e.preventDefault();
+  });
 
-    // ================================
-    // START DATE / END DATE
-    // ================================
+  // Flash messages fade out after a few seconds.
+  setTimeout(function () {
+    document.querySelectorAll(".flash").forEach(function (f) { f.remove(); });
+  }, 5000);
 
-    const startDate =
-        document.querySelector(
-            'input[name="start_date"]'
-        );
-
-    const endDate =
-        document.querySelector(
-            'input[name="end_date"]'
-        );
-
-    if (startDate && endDate) {
-
-        endDate.addEventListener(
-            "change",
-            function () {
-
-                if (
-                    startDate.value &&
-                    endDate.value &&
-                    endDate.value < startDate.value
-                ) {
-
-                    alert(
-                        "End date cannot be before start date."
-                    );
-
-                    endDate.value = "";
-
-                }
-
-            }
-        );
-
-    }
-
-
-    // ================================
-    // PASSWORD SHOW / HIDE
-    // ================================
-
-    const password =
-        document.querySelector(
-            'input[type="password"]'
-        );
-
-    const toggle =
-        document.querySelector(
-            ".password-toggle"
-        );
-
-    if (password && toggle) {
-
-        toggle.addEventListener(
-            "click",
-            function () {
-
-                if (
-                    password.type === "password"
-                ) {
-
-                    password.type = "text";
-
-                    toggle.textContent = "Hide";
-
-                } else {
-
-                    password.type = "password";
-
-                    toggle.textContent = "Show";
-
-                }
-
-            }
-        );
-
-    }
-
-});
+  if (location.hash === "#add-patient") openModal("addPatient");
+})();

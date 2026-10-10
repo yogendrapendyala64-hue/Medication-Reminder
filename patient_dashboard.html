@@ -1,133 +1,62 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-
-    <title>Dashboard</title>
-
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
-
-</head>
-
-<body>
-
-<div class="navbar">
-
-    <h1>💊 Medication Reminder</h1>
-
-    <div>
-
-        <a href="{{ url_for('dashboard') }}">
-            Dashboard
-        </a>
-
-        <a href="{{ url_for('patients') }}">
-            Patients
-        </a>
-
-        <a href="{{ url_for('add_prescription') }}">
-            Prescription
-        </a>
-
-        <a href="{{ url_for('report') }}">
-            Reports
-        </a>
-
-        <a href="{{ url_for('logout') }}">
-            Logout
-        </a>
-
-    </div>
-
+{% extends "base.html" %}
+{% block title %}Overview · MediPulse{% endblock %}
+{% block content %}
+<div class="top">
+  <div><div class="eyebrow">Your health space</div><h1>{{ greeting }}, {{ user['name'].split()[0] }}</h1></div>
+  <div class="date">{{ icon('cal', 14) }}{{ today_label }}</div>
 </div>
 
+<section class="banner">
+  <div><div class="eyebrow">Today's plan</div><h2>One day at a time.</h2><p>Keep your rhythm steady and your care team informed.</p></div>
+  <div class="ring" style="--p:{{ week['pct'] }}"><div>{{ week['pct'] }}%<small>adherence</small></div></div>
+</section>
 
-<div class="container">
-
-    <h1>Dashboard</h1>
-
-    <br>
-
-
-    <div class="dashboard-cards">
-
-        <div class="card">
-
-            <p>Total Patients</p>
-
-            <h2>{{ patient_count|default(0) }}</h2>
-
-        </div>
-
-
-        <div class="card">
-
-            <p>Total Prescriptions</p>
-
-            <h2>{{ prescription_count|default(0) }}</h2>
-
-        </div>
-
-    </div>
-
-
-    <div class="card">
-
-        <h2>Recent Prescriptions</h2>
-
-        <br>
-
-        <table>
-
-            <tr>
-
-                <th>Patient</th>
-                <th>Medicine</th>
-                <th>Dosage</th>
-                <th>Frequency</th>
-                <th>Reminder</th>
-
-            </tr>
-
-            {% for p in prescriptions %}
-
-            <tr>
-
-                <td>{{ p.patient_name }}</td>
-
-                <td>{{ p.medicine_name }}</td>
-
-                <td>{{ p.dosage }}</td>
-
-                <td>{{ p.frequency }}</td>
-
-                <td>{{ p.reminder_time }}</td>
-
-            </tr>
-
-            {% else %}
-
-            <tr>
-
-                <td colspan="5">
-                    No prescriptions found.
-                </td>
-
-            </tr>
-
-            {% endfor %}
-
-        </table>
-
-    </div>
-
+<div class="stats">
+  <div class="stat"><span class="chip-ic">{{ icon('clip') }}</span><div><small>Active medications</small><b>{{ plan|length }}</b><span>in your plan</span></div></div>
+  <div class="stat"><span class="chip-ic">{{ icon('check') }}</span><div><small>Taken this week</small><b>{{ week['taken'] }}</b><span>doses logged</span></div></div>
+  <div class="stat"><span class="chip-ic amber">{{ icon('cal') }}</span><div><small>Current streak</small><b>{{ streak }} day{{ '' if streak == 1 else 's' }}</b><span>keep it going</span></div></div>
 </div>
 
+<div class="split" style="grid-template-columns:minmax(0,1fr) minmax(250px,.42fr)">
+  <div class="panel" id="today">
+    <div class="panel-head"><div><div class="eyebrow">Your routine</div><h3>Today's medications</h3></div><span class="pill">{{ plan|length }} active</span></div>
+    {% if plan %}
+    <div class="rx" style="margin-top:0">
+      {% for rx in plan %}
+      <div class="rxrow">
+        <span class="chip-ic">{{ icon('clip') }}</span>
+        <div class="mid">
+          <div class="nm">{{ rx['name'] }}<span class="tag">{{ rx['dosage'] }}</span></div>
+          <div class="meta">{{ rx['frequency'] }} · {{ rx['reminder_time'] }}</div>
+          {% if rx['instructions'] %}<div class="ins">{{ rx['instructions'] }}</div>{% endif %}
+        </div>
+        {% if rx['status'] %}
+        <div class="state">
+          <span class="pill{{ ' bad' if rx['status'] == 'missed' }}">{{ 'Taken' if rx['status'] == 'taken' else 'Missed' }}</span>
+          <form method="post" action="{{ url_for('log_dose', rx_id=rx['id'], status='undo') }}"><button type="submit">Undo</button></form>
+        </div>
+        {% else %}
+        <div class="dose-btns">
+          <form method="post" action="{{ url_for('log_dose', rx_id=rx['id'], status='missed') }}"><button class="dbtn miss" type="submit">{{ icon('x', 11) }}Missed</button></form>
+          <form method="post" action="{{ url_for('log_dose', rx_id=rx['id'], status='taken') }}"><button class="dbtn take" type="submit">{{ icon('check', 11) }}Mark taken</button></form>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty" style="min-height:140px"><p>No medications yet. Your care provider will add them here.</p></div>
+    {% endif %}
+  </div>
 
-<script src="{{ url_for('static', filename='app.js') }}">
-</script>
-
-</body>
-
-</html>
+  <div class="panel week">
+    <span class="chip-ic amber">{{ icon('cal') }}</span>
+    <div class="eyebrow" style="margin-top:14px">This week</div>
+    <h3 style="margin-top:6px">Your care in focus.</h3>
+    <p>See how your medication rhythm is moving, then share it with your care team.</p>
+    <div class="bar"><i style="width:{{ week['pct'] }}%"></i></div>
+    <div class="nums"><div><b>{{ week['pct'] }}%</b><small>adherence</small></div><div><b>{{ week['total'] }}</b><small>tracked doses</small></div></div>
+    <a class="btn ghost block" href="{{ url_for('report_pdf', patient_id=patient['id']) }}">{{ icon('dl', 14) }}Download weekly report</a>
+  </div>
+</div>
+{% endblock %}

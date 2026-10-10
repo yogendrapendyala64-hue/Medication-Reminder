@@ -1,131 +1,90 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
 <head>
-
-    <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>
-        {% block title %}
-        Medication Reminder
-        {% endblock %}
-    </title>
-
-    <link
-        rel="stylesheet"
-        href="{{ url_for('static', filename='style.css') }}"
-    >
-
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}MediPulse{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-
 <body>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flashes" role="status">
+    {% for category, message in messages %}
+    <div class="flash {{ category }}"><span>{{ message }}</span><button type="button" data-dismiss aria-label="Dismiss">{{ icon('x', 12) }}</button></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
 
-<header class="topbar">
-
-    <a
-        href="{{ url_for('index') }}"
-        class="brand"
-    >
-        <span class="brand-icon">+</span>
-        MedTrack
-    </a>
-
-    <nav>
-
-        {% if session.get("user_id") %}
-
-            {% if session.get("role") == "doctor" %}
-
-                <a href="{{ url_for('doctor_dashboard') }}">
-                    Dashboard
-                </a>
-
-                <a href="{{ url_for('add_prescription') }}">
-                    Add Medication
-                </a>
-
-            {% else %}
-
-                <a href="{{ url_for('patient_dashboard') }}">
-                    My Dashboard
-                </a>
-
-                <a href="{{ url_for('patient_report_pdf') }}">
-                    Weekly Report
-                </a>
-
-            {% endif %}
-
-            <a
-                href="{{ url_for('logout') }}"
-                class="logout-link"
-            >
-                Logout
-            </a>
-
-        {% else %}
-
-            <a href="{{ url_for('login') }}">
-                Login
-            </a>
-
-            <a
-                href="{{ url_for('register') }}"
-                class="nav-button"
-            >
-                Patient Sign Up
-            </a>
-
+{% if user %}
+<div class="app">
+  <aside class="side">
+    <a class="logo" href="{{ url_for('dashboard') }}">{{ icon('heart') }}MediPulse</a>
+    <div class="who">
+      <span class="avatar">{{ user['name']|initials }}</span>
+      <div><b>{{ user['name'] }}</b><small>{{ 'Care provider' if user['role'] == 'doctor' else 'Patient' }}</small></div>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      {% if user['role'] == 'doctor' %}
+        <a href="{{ url_for('doctor_dashboard') }}" class="{{ 'on' if request.endpoint == 'doctor_dashboard' }}">{{ icon('pulse') }}Overview</a>
+        <a href="{{ url_for('patients') }}" class="{{ 'on' if request.endpoint in ('patients', 'patient_details', 'add_prescription', 'edit_prescription') }}">{{ icon('users') }}Patients</a>
+      {% else %}
+        <a href="{{ url_for('patient_dashboard') }}" class="{{ 'on' if request.endpoint == 'patient_dashboard' }}">{{ icon('pulse') }}Overview</a>
+        {% if my_patient %}
+        <a href="{{ url_for('report_view', patient_id=my_patient['id']) }}" class="{{ 'on' if request.endpoint == 'report_view' }}">{{ icon('cal') }}Weekly report</a>
         {% endif %}
-
+      {% endif %}
     </nav>
+    <div class="side-foot">
+      <div class="nudge">{{ icon('bell', 14) }}<div><b>Stay consistent.</b>Your care team is with you.</div></div>
+      <a class="signout" href="{{ url_for('auth.logout') }}">{{ icon('out', 15) }}Sign out</a>
+    </div>
+  </aside>
+  <main class="main">
+{% else %}
+<div class="login">
+  <section class="hero">
+    <a class="logo" href="{{ url_for('landing') }}">{{ icon('heart') }}MediPulse</a>
+    <div>
+      <div class="kicker">CARE, IN RHYTHM</div>
+      <h1>Small steps.<em>Better days.</em></h1>
+      <p class="lede">A calmer way to keep every prescription, reminder, and recovery moment in view.</p>
+    </div>
+    <div></div>
+  </section>
+  <section class="formside"><div class="formbox">
+{% endif %}
 
-</header>
+{% block content %}{% endblock %}
 
-
-<main class="page">
-
-    {% with messages = get_flashed_messages(
-        with_categories=true
-    ) %}
-
-        {% if messages %}
-
-            <div class="flash-container">
-
-                {% for category, message in messages %}
-
-                    <div class="flash {{ category }}">
-                        {{ message }}
-                    </div>
-
-                {% endfor %}
-
-            </div>
-
-        {% endif %}
-
-    {% endwith %}
-
-
-    {% block content %}
-    {% endblock %}
-
-</main>
-
-
-<script
-    src="{{ url_for('static', filename='app.js') }}"
-></script>
-
-{% block scripts %}
-{% endblock %}
-
+{% if user %}
+  </main>
+</div>
+{% if user['role'] == 'doctor' %}
+<div class="scrim" id="addPatient" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addPatientTitle">
+    <button class="close" type="button" data-close-modal aria-label="Close">{{ icon('x', 14) }}</button>
+    <div class="eyebrow">Care plan</div>
+    <h2 id="addPatientTitle">Add a patient</h2>
+    <form method="post" action="{{ url_for('add_patient') }}">
+      <div class="field"><label for="p_name">Full name</label><input id="p_name" name="name" placeholder="Jordan Williams" required></div>
+      <div class="field"><label for="p_email">Email address</label><input id="p_email" name="email" type="email" placeholder="patient@example.com" required></div>
+      <div class="field"><label for="p_phone">Phone number</label><input id="p_phone" name="phone" type="tel" placeholder="(555) 000-0000"></div>
+      <div class="field"><label for="p_dob">Date of birth</label><input id="p_dob" name="dob" type="date"></div>
+      <div class="field"><label for="p_cond">Primary condition</label><input id="p_cond" name="condition" placeholder="e.g. Hypertension"></div>
+      <button class="btn block" type="submit">{{ icon('plus', 14) }}Add patient</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% else %}
+  </div></section>
+</div>
+{% endif %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
-
 </html>

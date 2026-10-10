@@ -1,156 +1,28 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-
-    <title>Add Prescription</title>
-
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
-
-</head>
-
-<body>
-
-<div class="navbar">
-
-    <h1>💊 Add Prescription</h1>
-
-    <a href="{{ url_for('dashboard') }}">
-        Dashboard
-    </a>
-
+{% extends "base.html" %}
+{% block title %}{% block page_title %}New prescription{% endblock %} · MediPulse{% endblock %}
+{% block content %}
+<div class="formpage">
+  <a class="back" href="{{ url_for('patient_details', patient_id=patient['id']) }}">{{ icon('chev', 12) }}{{ patient['name'] }}</a>
+  <div class="panel" style="margin-top:14px">
+    <div><div class="eyebrow">Care plan</div><h2 style="font-size:24px;font-weight:600;letter-spacing:-.03em;margin-top:4px">{% block heading %}New prescription for {{ patient['name'] }}{% endblock %}</h2></div>
+    <form method="post" action="{% block action %}{{ url_for('add_prescription', patient_id=patient['id']) }}{% endblock %}">
+      <div class="field"><label for="name">Medication name</label><input id="name" name="name" value="{{ form.get('name', '') }}" placeholder="e.g. Lisinopril" required></div>
+      <div class="field"><label for="dosage">Dosage</label><input id="dosage" name="dosage" value="{{ form.get('dosage', '') }}" placeholder="e.g. 10 mg" required></div>
+      <div class="grid2">
+        <div class="field"><label for="reminder_time">Reminder time</label><input id="reminder_time" name="reminder_time" type="time" value="{{ form.get('reminder_time', '08:00') }}" required></div>
+        <div class="field"><label for="frequency">Frequency</label>
+          <select id="frequency" name="frequency">
+            {% for f in frequencies %}<option {{ 'selected' if form.get('frequency') == f }}>{{ f }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="start_date">Start date</label><input id="start_date" name="start_date" type="date" value="{{ form.get('start_date', '') }}" required></div>
+        <div class="field"><label for="end_date">End date</label><input id="end_date" name="end_date" type="date" value="{{ form.get('end_date', '') }}"></div>
+      </div>
+      <div class="field"><label for="instructions">Instructions</label><input id="instructions" name="instructions" value="{{ form.get('instructions', '') }}" placeholder="Take with food"></div>
+      <button class="btn block" type="submit">{{ icon('check', 14) }}{% block submit_label %}Save prescription{% endblock %}</button>
+    </form>
+  </div>
 </div>
-
-
-<div class="container">
-
-    <div class="form-card">
-
-        <h2>Add Medicine</h2>
-
-        <br>
-
-        <form method="POST">
-
-
-            <div class="form-group">
-
-                <label>Patient</label>
-
-                <select
-                    name="patient_id"
-                    required
-                >
-
-                    <option value="">
-                        Select Patient
-                    </option>
-
-                    {% for patient in patients %}
-
-                    <option value="{{ patient.id }}">
-
-                        {{ patient.name }}
-
-                    </option>
-
-                    {% endfor %}
-
-                </select>
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label>Medicine Name</label>
-
-                <input
-                    type="text"
-                    name="medicine_name"
-                    required
-                >
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label>Dosage</label>
-
-                <input
-                    type="text"
-                    name="dosage"
-                    placeholder="Example: 500 mg"
-                >
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label>Frequency</label>
-
-                <input
-                    type="text"
-                    name="frequency"
-                    placeholder="Example: Twice a day"
-                >
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label>Start Date</label>
-
-                <input
-                    type="date"
-                    name="start_date"
-                >
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label>End Date</label>
-
-                <input
-                    type="date"
-                    name="end_date"
-                >
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label>Reminder Time</label>
-
-                <input
-                    type="time"
-                    name="reminder_time"
-                >
-
-            </div>
-
-
-            <button type="submit">
-                Save Prescription
-            </button>
-
-        </form>
-
-    </div>
-
-</div>
-
-
-<script src="{{ url_for('static', filename='app.js') }}">
-</script>
-
-</body>
-
-</html>
+{% endblock %}

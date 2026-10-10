@@ -1,81 +1,18 @@
 {% extends "base.html" %}
-
-{% block title %}
-Medication Reminder
-{% endblock %}
-
-
+{% block title %}MediPulse{% endblock %}
 {% block content %}
-
-<section class="hero">
-
-    <div>
-
-        <div class="eyebrow">
-            SMART MEDICATION MANAGEMENT
-        </div>
-
-        <h1>
-            Never miss an important medication.
-        </h1>
-
-        <p>
-            MedTrack helps doctors manage patient
-            prescriptions and gives every patient
-            an individual dashboard with medication
-            reminders and weekly reports.
-        </p>
-
-        <div class="hero-actions">
-
-            <a
-                href="{{ url_for('login') }}"
-                class="btn primary"
-            >
-                Login
-            </a>
-
-            <a
-                href="{{ url_for('register') }}"
-                class="btn secondary"
-            >
-                Create Patient Account
-            </a>
-
-        </div>
-
-    </div>
-
-
-    <div class="hero-card">
-
-        <div class="pulse">
-            +
-        </div>
-
-        <h2>
-            Medication tracking
-        </h2>
-
-        <p>
-            Doctor → Prescription → Reminder →
-            Patient → Weekly Report
-        </p>
-
-        <div class="mini-stat">
-            Individual patient dashboards
-        </div>
-
-        <div class="mini-stat">
-            Medication adherence tracking
-        </div>
-
-        <div class="mini-stat">
-            Downloadable weekly reports
-        </div>
-
-    </div>
-
-</section>
-
+<div class="eyebrow">Welcome</div>
+<h2>Your care, connected.</h2>
+<p class="sub">Doctors keep care plans clear. Patients keep every dose on track.</p>
+<div class="cta-stack">
+  <a class="btn block" href="{{ url_for('auth.login') }}">Sign in {{ icon('arrow', 14) }}</a>
+  <a class="btn ghost block" href="{{ url_for('auth.register') }}">Create an account</a>
+</div>
+<div class="demo-label">Try a demo workspace</div>
+<form method="post" action="{{ url_for('auth.demo', role='doctor') }}">
+  <button class="demo" type="submit">{{ icon('steth') }}<span><b>Doctor demo</b><small>Manage patient care</small></span><span class="go">{{ icon('chev', 14) }}</span></button>
+</form>
+<form method="post" action="{{ url_for('auth.demo', role='patient') }}">
+  <button class="demo" type="submit">{{ icon('user') }}<span><b>Patient demo</b><small>Track your medications</small></span><span class="go">{{ icon('chev', 14) }}</span></button>
+</form>
 {% endblock %}

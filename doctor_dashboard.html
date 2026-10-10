@@ -1,125 +1,53 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-
-    <title>Doctor Dashboard</title>
-
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
-
-</head>
-
-<body>
-
-<div class="navbar">
-
-    <h1>👨‍⚕️ Doctor Dashboard</h1>
-
-    <div>
-
-        <a href="{{ url_for('patients') }}">
-            Patients
-        </a>
-
-        <a href="{{ url_for('add_prescription') }}">
-            Add Prescription
-        </a>
-
-        <a href="{{ url_for('report') }}">
-            Reports
-        </a>
-
-        <a href="{{ url_for('logout') }}">
-            Logout
-        </a>
-
-    </div>
-
+{% extends "base.html" %}
+{% block title %}Overview · MediPulse{% endblock %}
+{% block content %}
+<div class="top">
+  <div><div class="eyebrow">Clinic overview</div><h1>{{ greeting }}, {{ user['name'] }}</h1></div>
+  <div class="date">{{ icon('cal', 14) }}{{ today_label }}</div>
 </div>
 
+<section class="banner">
+  <div><div class="eyebrow">Care team dashboard</div><h2>Your patients, at a glance.</h2><p>Keep every care plan clear, personal, and moving forward.</p></div>
+  <button class="btn" type="button" data-open-modal="addPatient">{{ icon('plus', 14) }}Add patient</button>
+</section>
 
-<div class="container">
-
-    <div class="dashboard-cards">
-
-        <div class="card">
-
-            <h3>Total Patients</h3>
-
-            <h2>{{ patients|length }}</h2>
-
-        </div>
-
-        <div class="card">
-
-            <h3>Total Prescriptions</h3>
-
-            <h2>{{ prescriptions|length }}</h2>
-
-        </div>
-
-    </div>
-
-
-    <div class="card">
-
-        <h2>Patients</h2>
-
-        <br>
-
-        <table>
-
-            <tr>
-
-                <th>ID</th>
-                <th>Name</th>
-                <th>Age</th>
-                <th>Gender</th>
-                <th>Phone</th>
-                <th>Action</th>
-
-            </tr>
-
-            {% for patient in patients %}
-
-            <tr>
-
-                <td>{{ patient.id }}</td>
-
-                <td>{{ patient.name }}</td>
-
-                <td>{{ patient.age }}</td>
-
-                <td>{{ patient.gender }}</td>
-
-                <td>{{ patient.phone }}</td>
-
-                <td>
-
-                    <a class="btn"
-                       href="{{ url_for('patient_details', patient_id=patient.id) }}">
-
-                        View
-
-                    </a>
-
-                </td>
-
-            </tr>
-
-            {% endfor %}
-
-        </table>
-
-    </div>
-
+<div class="stats">
+  <div class="stat"><span class="chip-ic">{{ icon('users') }}</span><div><small>Active patients</small><b>{{ total }}</b><span>in your care</span></div></div>
+  <div class="stat"><span class="chip-ic">{{ icon('clip') }}</span><div><small>Care plans</small><b>{{ plans }}</b><span>being monitored</span></div></div>
+  <div class="stat"><span class="chip-ic amber">{{ icon('pulse') }}</span><div><small>Follow-ups</small><b>{{ follow_ups|length }}</b><span>this week</span></div></div>
 </div>
 
-<script src="{{ url_for('static', filename='app.js') }}">
-</script>
+<div class="split">
+  <div class="panel">
+    <div class="panel-head"><div><div class="eyebrow">Your patients</div><h3>Care directory</h3></div><span class="pill">{{ total }} total</span></div>
+    <div class="search">{{ icon('search', 14) }}<input id="dirSearch" data-filter="#plist" placeholder="Search by name, email, condition" aria-label="Search patients"></div>
+    <div class="plist" id="plist">
+      {% for p in patients %}
+      <a class="prow" href="{{ url_for('patient_details', patient_id=p['id']) }}" data-search="{{ (p['name'] ~ ' ' ~ p['email'] ~ ' ' ~ p['condition'])|lower }}">
+        <span class="avatar">{{ p['name']|initials }}</span>
+        <div><b>{{ p['name'] }}</b><small>{{ p['condition'] }}</small></div>{{ icon('chev', 14) }}
+      </a>
+      {% endfor %}
+    </div>
+    <div class="empty" data-empty hidden style="min-height:100px"><p>No patients match your search.</p></div>
+  </div>
 
-</body>
-
-</html>
-
+  <div class="panel">
+    <div class="panel-head"><div><div class="eyebrow">This week</div><h3>Needs a follow-up</h3></div></div>
+    {% if follow_ups %}
+    <div class="followups">
+      {% for p in follow_ups %}
+      <a class="prow" href="{{ url_for('patient_details', patient_id=p['id']) }}">
+        <span class="avatar">{{ p['name']|initials }}</span>
+        <div><b>{{ p['name'] }}</b>
+          <small>{% if not p['active_meds'] %}No active prescriptions yet{% else %}{{ p['week']['missed'] }} missed dose{{ '' if p['week']['missed'] == 1 else 's' }} · {{ p['week']['pct'] }}% adherence{% endif %}</small></div>
+        {{ icon('chev', 14) }}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty"><span class="chip-ic">{{ icon('check') }}</span><b>Everyone is on track</b><p>No missed doses this week.</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
